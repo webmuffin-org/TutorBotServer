@@ -259,7 +259,7 @@ class SSRContentLoader:
                 running_size += content_size
             else:
                 logger.info(
-                    "SSR content limit exceeded",
+                    f"{content_key} was not loaded because SSR content limit exceeded.  Should be requested again next pass",
                     extra={
                         "session_key": session_key,
                         "content_key": content_key,
@@ -268,9 +268,9 @@ class SSRContentLoader:
                         "action_plan": request.actionPlan or "",
                     },
                 )
-                break
+                loaded_contents.append(f"<" + content_key + ">" + "Failed to Load this because SSR Content size exceeded.  Ask for it again next pass" + "</" + content_key + ">\n")
 
-        xml_content = f"<ssrcontent>{', '.join(loaded_contents)}</ssrcontent>"
+        xml_content = f"<ssrcontent>{''.join(loaded_contents)}</ssrcontent>"
         status_message = (
             f"Loaded SSR Content {','.join(loaded_file_names)} for this request only."
         )
