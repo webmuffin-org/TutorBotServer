@@ -220,6 +220,7 @@ class SSRContentLoader:
         loaded_contents = []
         loaded_file_names = []
         running_size = 0
+        failed_keys = []
 
         for content_key in content_keys:
             content = get_llm_file(
@@ -258,6 +259,7 @@ class SSRContentLoader:
                 loaded_file_names.append(content_key)
                 running_size += content_size
             else:
+                failed_keys.append(content_key)
                 logger.info(
                     f"{content_key} was not loaded because SSR content limit exceeded.  Should be requested again next pass",
                     extra={
@@ -275,7 +277,7 @@ class SSRContentLoader:
             f"Loaded SSR Content {','.join(loaded_file_names)} for this request only."
         )
 
-        return xml_content, status_message
+        return xml_content, status_message, failed_keys
 
 
 def initialize_llm() -> BaseChatModel:
@@ -637,9 +639,12 @@ def invoke_llm_with_ssr(
                 "assistant", extract_message_content(LLMResponse), None
             )
 
-            content_loaded, loaded_status = content_loader.load_content_files(
+            content_loaded, loaded_status, failed_keys = content_loader.load_content_files(
                 p_Request, p_sessionKey, requested_keys
             )
+#if these keys failed to load, remove them from the memory of that event.
+            if failed_keys:
+                PreviouslyRequested = [key for key in PreviouslyRequested if key not in failed_keys]
 
             ssr_state.additional_content += content_loaded
             ssr_state.loaded_content_message = loaded_status
