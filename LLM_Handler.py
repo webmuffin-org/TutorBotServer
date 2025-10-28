@@ -118,7 +118,7 @@ class PromptBuilder:
     ) -> List[Tuple[str, str]]:
         """Build prompt format optimized for Anthropic models."""
         system_content = f"{scenario}\n{conundrum}\n{additional_content}"
-        user_content = f"Respond to User's Request = ({loaded_content_message + user_request}) following these instructions ({action_plan})"
+        user_content = f"Answer ({user_request}) following these instructions.\n{action_plan})"
         return [
             ("system", system_content),
             *conversation_history,
@@ -244,7 +244,7 @@ class SSRContentLoader:
                         "action_plan": request.actionPlan or "",
                     },
                 )
-                loaded_contents.append(f"<" + content_key + ">No Content by this name Exists</" + content_key + ">\n")
+                loaded_contents.append(f"<ssrcontent name='{content_key}'>No Content by this name Exists</ssrcontent>\n")
                 loaded_file_names.append(content_key)
 
                 continue
@@ -255,13 +255,13 @@ class SSRContentLoader:
                 not loaded_contents
                 or running_size + content_size <= self.max_size_bytes
             ):
-                loaded_contents.append(f"<" + content_key + ">" + content + "</" + content_key + ">\n")
+                loaded_contents.append(f"\n<ssrcontent name='{content_key}'>\n{content}\n</ssrcontent>\n")
                 loaded_file_names.append(content_key)
                 running_size += content_size
             else:
                 failed_keys.append(content_key)
                 logger.info(
-                    f"{content_key} was not loaded because SSR content limit exceeded.  Should be requested again next pass",
+                    f"{content_key} was not loaded because SSR content limit exceeded.",
                     extra={
                         "session_key": session_key,
                         "content_key": content_key,
@@ -270,9 +270,9 @@ class SSRContentLoader:
                         "action_plan": request.actionPlan or "",
                     },
                 )
-                loaded_contents.append(f"<" + content_key + ">" + "Failed to Load this because SSR Content size exceeded.  Ask for it again next pass" + "</" + content_key + ">\n")
+                loaded_contents.append(f"<ssrcontent name='{content_key}'>Failed to Load this because SSR Content size exceeded.</ssrcontent>\n")
 
-        xml_content = f"<ssrcontent>{''.join(loaded_contents)}</ssrcontent>"
+        xml_content = f"<ssrcontents>{''.join(loaded_contents)}</ssrcontenst>"
         status_message = (
             f"Loaded SSR Content {','.join(loaded_file_names)} for this request only."
         )
@@ -395,7 +395,7 @@ def invoke_llm_with_ssr(
 ) -> str:
     global LastResponse
     try:
-        PreviouslyRequested: List[str] = []
+        SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP: List[str] = []
 
         # start by getting the various prompt components.
         # The p_Request contains the Lesson, Conundrum (Lesson), ActionPlan,
@@ -444,19 +444,19 @@ def invoke_llm_with_ssr(
         content_loader = SSRContentLoader()
         ssr_state = SSRIterationState()
 
-        logger.info(
-            "Start LLM processing loop",
-            extra={
-                "session_key": p_sessionKey,
-                "max_iterations": str(SSR_MAX_ITERATIONS),
-                "class_selection": p_Request.classSelection or "",
-                "lesson": p_Request.lesson or "",
-                "action_plan": p_Request.actionPlan or "",
-            },
-        )
-
         while True:
             ssr_state.increment_iteration()
+
+            logger.info(
+                f"In SSR processing loop with count {ssr_state.iteration_count}",
+                extra={
+                    "session_key": p_sessionKey,
+                    "max_iterations": str(SSR_MAX_ITERATIONS),
+                    "class_selection": p_Request.classSelection or "",
+                    "lesson": p_Request.lesson or "",
+                    "action_plan": p_Request.actionPlan or "",
+                },
+            )
 
             import time
             TempAdditionalContent = ssr_state.additional_content
@@ -464,9 +464,9 @@ def invoke_llm_with_ssr(
             temp_additional_content = (
                     f"<CURRENT_DATE_TIME>{current_time}</CURRENT_DATE_TIME>\n"
                     + TempAdditionalContent
-                    + "<PreviouslyRequested>"
-                    + ", ".join(PreviouslyRequested)
-                    + "</PreviouslyRequested>\n"
+                    + "<SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP>"
+                    + ", ".join(SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP)
+                    + "</SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP>\n"
             )
 
             messages = PromptBuilder.build_prompt(
@@ -495,7 +495,7 @@ def invoke_llm_with_ssr(
 
             if ssr_state.iteration_count == 1:
                 logger.info(
-                    f"USER REQUEST :({p_Request.text}).  LLM REQUEST : \n{messages_str}",
+                    f"USER REQUEST : {p_Request.text}\n{messages_str}",
                     extra={
                         "session_key": p_sessionKey,
                         "messages": parsed_messages,
@@ -506,7 +506,7 @@ def invoke_llm_with_ssr(
                 )
             else:
                 logger.info(
-                    f"SSR REQUEST : ({p_Request.text})\nLLM REQUEST :({messages_str})",
+                    f"SSR REQUEST : {p_Request.text}\n{messages_str}",
                     extra={
                         "session_key": p_sessionKey,
                         "messages": parsed_messages,
@@ -535,7 +535,7 @@ def invoke_llm_with_ssr(
             )
 
             if requested_keys:
-                PreviouslyRequested.extend(requested_keys)
+                SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP.extend(requested_keys)
 
             logger.info(
                 f"LLM RESPONSE :\n{LLMMessage}",
@@ -595,7 +595,7 @@ def invoke_llm_with_ssr(
                     ssr_state.iteration_count,
                 )
                 LLMMessage += answer_text + "\n"
-                LLMMessage += "**SSR exceeded loop count.  Answer may not have considered all information**"
+                LLMMessage += "**SSR exceeded loop count.  Consider narrowing down your question**"
 
                 logger.warning(
                     "SSR Loop exceeded maximum iterations",
@@ -644,9 +644,9 @@ def invoke_llm_with_ssr(
             )
 #if these keys failed to load, remove them from the memory of that event.
             if failed_keys:
-                PreviouslyRequested = [key for key in PreviouslyRequested if key not in failed_keys]
+                SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP = [key for key in SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP if key not in failed_keys]
 
-            ssr_state.additional_content += content_loaded
+            ssr_state.additional_content     = content_loaded
             ssr_state.loaded_content_message = loaded_status
 
             # End of while loop
