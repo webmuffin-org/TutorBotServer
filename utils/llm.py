@@ -9,6 +9,24 @@ from utils.logger import get_logger
 logger = get_logger()
 
 
+def redact_access_key(key: str) -> str:
+    """
+    Redact access key for safe logging using partial masking.
+    Shows first 4 and last 4 characters with ... in between.
+
+    Examples:
+        "sk-abc123456789xyz" -> "sk-a...9xyz"
+        "short" -> "s...t"
+        "" -> "no_key"
+    """
+    if not key:
+        return "no_key"
+    if len(key) <= 8:
+        # For very short keys, show first and last char only
+        return f"{key[0]}...{key[-1]}" if len(key) >= 2 else "***"
+    return f"{key[:4]}...{key[-4:]}"
+
+
 def validate_access_key(
     access_key: str,
     session_key: str,

@@ -226,8 +226,8 @@ class SSRContentLoader:
         self.max_size_bytes = max_size_tokens * BYTES_PER_TOKEN_ESTIMATE
 
     def load_content_files(
-        self, request: PyMessage, session_key: str, content_keys: List[str]
-    ) -> Tuple[str, str]:
+        self, request: PyMessage, session_key: str, content_keys: List[str], redacted_access_key: str = ""
+    ) -> Tuple[str, str, List[str]]:
         """Load content files with size management."""
         loaded_contents = []
         loaded_file_names = []
@@ -250,6 +250,7 @@ class SSRContentLoader:
                     "Failed to load SSR content",
                     extra={
                         "session_key": session_key,
+                        "redacted_access_key": redacted_access_key,
                         "content_key": content_key,
                         "class_selection": request.classSelection or "",
                         "lesson": request.lesson or "",
@@ -276,6 +277,7 @@ class SSRContentLoader:
                     f"{content_key} was not loaded because SSR content limit exceeded.",
                     extra={
                         "session_key": session_key,
+                        "redacted_access_key": redacted_access_key,
                         "content_key": content_key,
                         "class_selection": request.classSelection or "",
                         "lesson": request.lesson or "",
@@ -372,6 +374,7 @@ except Exception as e:
 def get_token_count(
     llm_response: BaseMessage,
     p_sessionKey: str,
+    redacted_access_key: str = "",
     class_selection: str = "",
     lesson: str = "",
     action_plan: str = "",
@@ -390,6 +393,7 @@ def get_token_count(
             f"Token usage Input {input_tokens}, Output {output_tokens}",
             extra={
                 "session_key": p_sessionKey,
+                "redacted_access_key": redacted_access_key,
                 "input_tokens": str(input_tokens),
                 "output_tokens": str(output_tokens),
                 "total_tokens": str(input_tokens + output_tokens),
@@ -403,7 +407,7 @@ def get_token_count(
 
 
 def invoke_llm_with_ssr(
-    p_SessionCache: "SessionCache", p_Request: PyMessage, p_sessionKey: str
+    p_SessionCache: "SessionCache", p_Request: PyMessage, p_sessionKey: str, redacted_access_key: str
 ) -> str:
     global LastResponse
     try:
@@ -465,6 +469,7 @@ def invoke_llm_with_ssr(
                 f"In SSR processing loop with count {ssr_state.iteration_count}",
                 extra={
                     "session_key": p_sessionKey,
+                    "redacted_access_key": redacted_access_key,
                     "max_iterations": str(SSR_MAX_ITERATIONS),
                     "class_selection": p_Request.classSelection or "",
                     "lesson": p_Request.lesson or "",
@@ -512,6 +517,7 @@ def invoke_llm_with_ssr(
                     f"USER REQUEST : {p_Request.text}\n{messages_str}",
                     extra={
                         "session_key": p_sessionKey,
+                        "redacted_access_key": redacted_access_key,
                         "messages": parsed_messages,
                         "class_selection": p_Request.classSelection or "",
                         "lesson": p_Request.lesson or "",
@@ -523,6 +529,7 @@ def invoke_llm_with_ssr(
                     f"SSR REQUEST : {p_Request.text}\n{messages_str}",
                     extra={
                         "session_key": p_sessionKey,
+                        "redacted_access_key": redacted_access_key,
                         "messages": parsed_messages,
                         "class_selection": p_Request.classSelection or "",
                         "lesson": p_Request.lesson or "",
@@ -535,6 +542,7 @@ def invoke_llm_with_ssr(
             request_token_count, response_token_count = get_token_count(
                 LLMResponse,
                 p_sessionKey,
+                redacted_access_key,
                 p_Request.classSelection or "",
                 p_Request.lesson or "",
                 p_Request.actionPlan or "",
@@ -555,6 +563,7 @@ def invoke_llm_with_ssr(
                 f"LLM RESPONSE :\n{LLMMessage}",
                 extra={
                     "session_key": p_sessionKey,
+                    "redacted_access_key": redacted_access_key,
                     "total_input_tokens": str(ssr_state.total_input_tokens),
                     "total_output_tokens": str(ssr_state.total_output_tokens),
                     "llm_response": extract_message_content(LLMResponse),
@@ -577,6 +586,7 @@ def invoke_llm_with_ssr(
                         f"SSR USER RESPONSE : ({LLMMessage})",
                         extra={
                             "session_key": p_sessionKey,
+                            "redacted_access_key": redacted_access_key,
                             "total_input_tokens": str(ssr_state.total_input_tokens),
                             "total_output_tokens": str(ssr_state.total_output_tokens),
                             "llm_response": extract_message_content(LLMResponse),
@@ -590,6 +600,7 @@ def invoke_llm_with_ssr(
                         f"USER RESPONSE :\n{LLMMessage}",
                         extra={
                             "session_key": p_sessionKey,
+                            "redacted_access_key": redacted_access_key,
                             "total_input_tokens": str(ssr_state.total_input_tokens),
                             "total_output_tokens": str(ssr_state.total_output_tokens),
                             "llm_response": extract_message_content(LLMResponse),
@@ -615,6 +626,7 @@ def invoke_llm_with_ssr(
                     "SSR Loop exceeded maximum iterations",
                     extra={
                         "session_key": p_sessionKey,
+                        "redacted_access_key": redacted_access_key,
                         "max_iterations": str(SSR_MAX_ITERATIONS),
                         "iteration_count": str(ssr_state.iteration_count),
                         "reason": "iteration_count > SSR_MAX_ITERATIONS",
@@ -635,6 +647,7 @@ def invoke_llm_with_ssr(
                 f"SSR loop continuing because content ({requested_keys}) requested",
                 extra={
                     "session_key": p_sessionKey,
+                    "redacted_access_key": redacted_access_key,
                     "iteration_count": str(ssr_state.iteration_count),
                     "reason": "has_ssr_request is True and within max iterations",
                     "requested_keys": requested_keys,
@@ -654,7 +667,7 @@ def invoke_llm_with_ssr(
             )
 
             content_loaded, loaded_status, failed_keys = content_loader.load_content_files(
-                p_Request, p_sessionKey, requested_keys
+                p_Request, p_sessionKey, requested_keys, redacted_access_key
             )
 #if these keys failed to load, remove them from the memory of that event.
             if failed_keys:
@@ -685,6 +698,7 @@ def invoke_llm_with_ssr(
                 "Conversation exceeded maximum size",
                 extra={
                     "session_key": p_sessionKey,
+                    "redacted_access_key": redacted_access_key,
                     "user_conversation_size": str(user_conversation_size),
                     "class_selection": p_Request.classSelection or "",
                     "lesson": p_Request.lesson or "",
@@ -707,6 +721,7 @@ def invoke_llm_with_ssr(
             exc_info=True,
             extra={
                 "session_key": p_sessionKey,
+                "redacted_access_key": redacted_access_key,
                 "error": str(e),
                 "class_selection": p_Request.classSelection if p_Request else "",
                 "lesson": p_Request.lesson if p_Request else "",

@@ -40,7 +40,7 @@ from constants import (  # noqa: E402
 
 from utils.html_export import HTMLConversationExporter  # noqa: E402
 from utils.email import send_email  # noqa: E402
-from utils.llm import validate_access_key  # noqa: E402
+from utils.llm import validate_access_key, redact_access_key  # noqa: E402
 from utils.filesystem import (  # noqa: E402
     check_directory_exists,
     list_directory,
@@ -261,7 +261,7 @@ async def favicon():
 
 
 # Define your chatbot logic
-def generate_response(p_session_key: str, p_Request: PyMessage) -> str:
+def generate_response(p_session_key: str, p_Request: PyMessage, redacted_access_key: str) -> str:
 
     sessionCache = session_manager.get_session(p_session_key)
 
@@ -272,6 +272,7 @@ def generate_response(p_session_key: str, p_Request: PyMessage) -> str:
                 "Session did not specify Conundrum",
                 extra={
                     "session_key": p_session_key,
+                    "redacted_access_key": redacted_access_key,
                     "class_selection": p_Request.classSelection or "",
                     "lesson": p_Request.lesson or "",
                     "action_plan": p_Request.actionPlan or "",
@@ -284,6 +285,7 @@ def generate_response(p_session_key: str, p_Request: PyMessage) -> str:
                 "Session did not specify Lesson",
                 extra={
                     "session_key": p_session_key,
+                    "redacted_access_key": redacted_access_key,
                     "class_selection": p_Request.classSelection or "",
                     "lesson": p_Request.lesson or "",
                     "action_plan": p_Request.actionPlan or "",
@@ -296,19 +298,21 @@ def generate_response(p_session_key: str, p_Request: PyMessage) -> str:
                 "Session did not specify Action Plan",
                 extra={
                     "session_key": p_session_key,
+                    "redacted_access_key": redacted_access_key,
                     "class_selection": p_Request.classSelection or "",
                     "lesson": p_Request.lesson or "",
                     "action_plan": p_Request.actionPlan or "",
                 },
             )
             return "You must select an action plan to use this Bot"
-        return invoke_llm_with_ssr(sessionCache, p_Request, p_session_key)
+        return invoke_llm_with_ssr(sessionCache, p_Request, p_session_key, redacted_access_key)
     else:
         response = "Received unknown session key"
         logger.error(
             "Session key not found in generate_response",
             extra={
                 "session_key": p_session_key,
+                "redacted_access_key": redacted_access_key,
                 "response": response,
                 "class_selection": "",
                 "lesson": "",
@@ -325,6 +329,9 @@ def chatbot_endpoint(request: Request, message: PyMessage) -> JSONResponse:
 
     if not session_key:
         raise HTTPException(status_code=401, detail="Session key is missing")
+
+    # Redact access key for logging (always, regardless of cloud mode)
+    redacted_key = redact_access_key(message.accessKey)
 
     if cloud_mode_enabled:
         access_key = message.accessKey
@@ -345,14 +352,14 @@ def chatbot_endpoint(request: Request, message: PyMessage) -> JSONResponse:
                 "Session validated access key",
                 extra={
                     "session_key": session_key,
-                    "access_key": access_key,
+                    "redacted_access_key": redacted_key,
                     "class_selection": message.classSelection or "",
                     "lesson": message.lesson or "",
                     "action_plan": message.actionPlan or "",
                 },
             )
 
-    response_text = generate_response(session_key, message)
+    response_text = generate_response(session_key, message, redacted_key)
 
     response = JSONResponse(content={"text": response_text})
     origin = request.headers.get("origin")

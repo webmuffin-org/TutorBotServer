@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Tuple, Optional
 import html
 import re
@@ -244,10 +244,9 @@ class ConversationFormatter:
 
         for i, (role, content) in enumerate(conversation):
             if role in ["user", "assistant"]:
-                # Simulate message times with 30 second intervals
-                message_time = base_time.replace(
-                    minute=base_time.minute - ((len(conversation) - i) * 1)
-                )
+                # Simulate message times with 1 minute intervals
+                minutes_offset = (len(conversation) - i) * 1
+                message_time = base_time - timedelta(minutes=minutes_offset)
 
                 formatted_messages.append(
                     ConversationFormatter.format_message(

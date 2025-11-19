@@ -69,9 +69,9 @@ class LokiHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             # 1) Extract fields that should be labels
-            label_fields = ["class_selection", "lesson", "action_plan"]
+            label_fields = ["class_selection", "lesson", "action_plan", "redacted_access_key"]
             stream_labels = self.labels.copy()
-            
+
             # Add dynamic labels from record
             for field in label_fields:
                 value = getattr(record, field, "")
@@ -82,7 +82,7 @@ class LokiHandler(logging.Handler):
                     stream_labels[field] = str_value[:1024] if len(str_value) > 1024 else str_value
                 else:
                     stream_labels[field] = ""  # Empty string for missing values
-            
+
             # 2) Build details dictionary for JSON log message
             ignored = {
                 "msg",
@@ -96,8 +96,9 @@ class LokiHandler(logging.Handler):
                 "taskName",
                 # Exclude fields that are now labels
                 "class_selection",
-                "lesson", 
+                "lesson",
                 "action_plan",
+                "redacted_access_key",
             }
             detail = {}
             for k, v in record.__dict__.items():
