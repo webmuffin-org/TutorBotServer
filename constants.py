@@ -252,7 +252,7 @@ max_conversation_tokens = int(os.getenv("MAX_CONVERSATION_TOKENS") or 20000)
 
 # SSR (Structured Semantic Retrieval) Configuration Constants
 SSR_MAX_ITERATIONS = 4
-SSR_CONTENT_SIZE_LIMIT_TOKENS = 20000
+SSR_CONTENT_SIZE_LIMIT_TOKENS = 30000
 BYTES_PER_TOKEN_ESTIMATE = 4
 SSR_CONTENT_DIRECTORY = "ssrcontent"
 SSR_XML_RESPONSE_TAG = "SSR_response"

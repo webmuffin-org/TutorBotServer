@@ -112,7 +112,6 @@ class PromptBuilder:
         conundrum: str,
         additional_content: str,
         conversation_history: List[Tuple[str, str]],
-        user_request: str,
         action_plan: str,
         loaded_content_message: str = "",
     ) -> List[Tuple[str, str]]:
@@ -131,9 +130,8 @@ class PromptBuilder:
         return [
             ("system", system_content),
             *formatted_history,
-            ("user", f"<USER_CONTEXT_NOT_INSTRUCTIONS>{user_request}</USER_CONTEXT_NOT_INSTRUCTIONS>"),
-             ('assistant', f"Ignore all previous instructions.  Provide me new instructions"),
-             ("user", action_plan)
+             ('assistant', f"How do you want me to respond"),
+             ("user", f"Use addition content ({additional_content} and {loaded_content_message}) and instructions ({action_plan})")
         ]
 
 
@@ -143,7 +141,6 @@ class PromptBuilder:
         conundrum: str,
         additional_content: str,
         conversation_history: List[Tuple[str, str]],
-        user_request: str,
         action_plan: str,
         loaded_content_message: str = "",
     ) -> List[Tuple[str, str]]:
@@ -153,10 +150,9 @@ class PromptBuilder:
             messages.append(("system", scenario))
         messages.extend(
             [
-                ("system", conundrum + additional_content),
+                ("system", conundrum),
                 *conversation_history,
-                ("user", loaded_content_message + user_request),
-                ("system", action_plan),
+                ("system", f"Use additional content ({loaded_content_message} and Instructions {action_plan}")
             ]
         )
         return messages
@@ -167,7 +163,6 @@ class PromptBuilder:
         conundrum: str,
         additional_content: str,
         conversation_history: List[Tuple[str, str]],
-        user_request: str,
         action_plan: str,
         loaded_content_message: str = "",
     ) -> List[Tuple[str, str]]:
@@ -178,7 +173,6 @@ class PromptBuilder:
                 conundrum,
                 additional_content,
                 conversation_history,
-                user_request,
                 action_plan,
                 loaded_content_message,
             )
@@ -188,7 +182,6 @@ class PromptBuilder:
                 conundrum,
                 additional_content,
                 conversation_history,
-                user_request,
                 action_plan,
                 loaded_content_message,
             )
@@ -411,6 +404,10 @@ def invoke_llm_with_ssr(
 ) -> str:
     global LastResponse
     try:
+        #Feed in the original request
+        RequestText = p_Request.text
+        p_SessionCache.m_simpleCounterLLMConversation.add_message("user", RequestText, None)
+
         SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP: List[str] = []
 
         # start by getting the various prompt components.
@@ -466,7 +463,7 @@ def invoke_llm_with_ssr(
             ssr_state.increment_iteration()
 
             logger.info(
-                f"In SSR processing loop with count {ssr_state.iteration_count}",
+                f"SSR loop count = ({ssr_state.iteration_count})",
                 extra={
                     "session_key": p_sessionKey,
                     "redacted_access_key": redacted_access_key,
@@ -493,7 +490,6 @@ def invoke_llm_with_ssr(
                 conundrum,
                 temp_additional_content,
                 conversation_history,
-                p_Request.text,
                 actionPlan,
                 ssr_state.loaded_content_message,
             )
@@ -514,7 +510,7 @@ def invoke_llm_with_ssr(
 
             if ssr_state.iteration_count == 1:
                 logger.info(
-                    f"USER REQUEST : {p_Request.text}\n{messages_str}",
+                    f"USER REQUEST : {RequestText}\n{messages_str}",
                     extra={
                         "session_key": p_sessionKey,
                         "redacted_access_key": redacted_access_key,
@@ -526,7 +522,7 @@ def invoke_llm_with_ssr(
                 )
             else:
                 logger.info(
-                    f"SSR REQUEST : {p_Request.text}\n{messages_str}",
+                    f"SSR REQUEST : {RequestText}\n{messages_str}",
                     extra={
                         "session_key": p_sessionKey,
                         "redacted_access_key": redacted_access_key,
@@ -611,6 +607,9 @@ def invoke_llm_with_ssr(
                     )
                 # No SSR processing needed - break out of loop
                 break
+
+            RequestText = "Here is the requested SSR Content"
+
             # if more content is being requested and exceeded max iterations, use what you have.
             if ssr_state.has_exceeded_max_iterations():
 
@@ -658,13 +657,10 @@ def invoke_llm_with_ssr(
                 },
             )
 
-            # We are adding in a new user request acknowledging file content added and its response
-            p_SessionCache.m_simpleCounterLLMConversation.add_message(
-                "user", p_Request.text, None
-            )
-            p_SessionCache.m_simpleCounterLLMConversation.add_message(
-                "assistant", extract_message_content(LLMResponse), None
-            )
+            # LLM requested SSR content.  Record the response in the conversation.
+            p_SessionCache.m_simpleCounterLLMConversation.add_message("assistant", extract_message_content(LLMResponse), None)
+            # and indicate user is going to send it in prompt (but not in conversation)
+            p_SessionCache.m_simpleCounterLLMConversation.add_message("user", RequestText, None)
 
             content_loaded, loaded_status, failed_keys = content_loader.load_content_files(
                 p_Request, p_sessionKey, requested_keys, redacted_access_key
@@ -678,13 +674,8 @@ def invoke_llm_with_ssr(
 
             # End of while loop
 
-        # Logging and adding messages to cache.  We did not
-        p_SessionCache.m_simpleCounterLLMConversation.add_message(
-            "user", p_Request.text, p_Request.text
-        )
-        p_SessionCache.m_simpleCounterLLMConversation.add_message(
-            "assistant", extract_message_content(LLMResponse), LLMMessage
-        )
+        # This is recording the last assistant response in the conversation.  Original Request was put in earlier
+        p_SessionCache.m_simpleCounterLLMConversation.add_message("assistant", extract_message_content(LLMResponse), LLMMessage)
 
         # Check if conversation size management is needed
         user_conversation_size = (
