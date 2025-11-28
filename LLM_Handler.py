@@ -131,7 +131,7 @@ class PromptBuilder:
             ("system", system_content),
             *formatted_history,
              ('assistant', f"How do you want me to respond"),
-             ("user", f"Use addition content ({additional_content} and {loaded_content_message}) and instructions ({action_plan})")
+             ("user", f"{action_plan}")
         ]
 
 
@@ -250,7 +250,8 @@ class SSRContentLoader:
                         "action_plan": request.actionPlan or "",
                     },
                 )
-                loaded_contents.append(f"<ssrcontent name='{content_key}'>No Content by this name Exists</ssrcontent>\n")
+                loaded_contents.append(
+                    f'<ssrcontent name="{content_key}">No Content by this name Exists</ssrcontent>\n')
                 loaded_file_names.append(content_key)
 
                 continue
@@ -261,7 +262,8 @@ class SSRContentLoader:
                 not loaded_contents
                 or running_size + content_size <= self.max_size_bytes
             ):
-                loaded_contents.append(f"\n<ssrcontent name='{content_key}'>\n{content}\n</ssrcontent>\n")
+                loaded_contents.append(
+                    f'\n<ssrcontent name="{content_key}">\n{content}\n</ssrcontent>\n')
                 loaded_file_names.append(content_key)
                 running_size += content_size
             else:
@@ -277,12 +279,12 @@ class SSRContentLoader:
                         "action_plan": request.actionPlan or "",
                     },
                 )
-                loaded_contents.append(f"<ssrcontent name='{content_key}'>Failed to Load this because SSR Content size exceeded.</ssrcontent>\n")
+                loaded_contents.append(
+                    f'<ssrcontent name="{content_key}">Failed to Load this because SSR Content size exceeded.</ssrcontent>\n')
 
-        xml_content = f"<ssrcontents>{''.join(loaded_contents)}</ssrcontenst>"
+        xml_content = f'<ssrcontents>{"".join(loaded_contents)}</ssrcontents>'
         status_message = (
-            f"Loaded SSR Content {','.join(loaded_file_names)} for this request only."
-        )
+            f'Loaded SSR Content {",".join(loaded_file_names)} for this request only.')
 
         return xml_content, status_message, failed_keys
 
@@ -509,8 +511,10 @@ def invoke_llm_with_ssr(
                 messages_str = messages_str[:MAX_LOG_SIZE] + "... [TRUNCATED]"
 
             if ssr_state.iteration_count == 1:
+                clipped_request = (RequestText[:120] + "...") if len(RequestText) > 120 else RequestText
+
                 logger.info(
-                    f"USER REQUEST : {RequestText}\n{messages_str}",
+                    f"USER REQUEST : {clipped_request}\n{messages_str}",
                     extra={
                         "session_key": p_sessionKey,
                         "redacted_access_key": redacted_access_key,
