@@ -468,6 +468,7 @@ def invoke_llm_with_ssr(
                 f"SSR loop count = ({ssr_state.iteration_count})",
                 extra={
                     "session_key": p_sessionKey,
+                    "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id,
                     "redacted_access_key": redacted_access_key,
                     "max_iterations": str(SSR_MAX_ITERATIONS),
                     "class_selection": p_Request.classSelection or "",
@@ -517,6 +518,7 @@ def invoke_llm_with_ssr(
                     f"USER REQUEST : {clipped_request}\n{messages_str}",
                     extra={
                         "session_key": p_sessionKey,
+                        "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id,
                         "redacted_access_key": redacted_access_key,
                         "messages": parsed_messages,
                         "class_selection": p_Request.classSelection or "",
@@ -529,6 +531,7 @@ def invoke_llm_with_ssr(
                     f"SSR REQUEST : {RequestText}\n{messages_str}",
                     extra={
                         "session_key": p_sessionKey,
+                        "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id,
                         "redacted_access_key": redacted_access_key,
                         "messages": parsed_messages,
                         "class_selection": p_Request.classSelection or "",
@@ -563,6 +566,7 @@ def invoke_llm_with_ssr(
                 f"LLM RESPONSE :\n{LLMMessage}",
                 extra={
                     "session_key": p_sessionKey,
+                    "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id,
                     "redacted_access_key": redacted_access_key,
                     "total_input_tokens": str(ssr_state.total_input_tokens),
                     "total_output_tokens": str(ssr_state.total_output_tokens),
@@ -586,6 +590,7 @@ def invoke_llm_with_ssr(
                         f"SSR USER RESPONSE : ({LLMMessage})",
                         extra={
                             "session_key": p_sessionKey,
+                            "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id,
                             "redacted_access_key": redacted_access_key,
                             "total_input_tokens": str(ssr_state.total_input_tokens),
                             "total_output_tokens": str(ssr_state.total_output_tokens),
@@ -600,6 +605,7 @@ def invoke_llm_with_ssr(
                         f"USER RESPONSE :\n{LLMMessage}",
                         extra={
                             "session_key": p_sessionKey,
+                            "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id,
                             "redacted_access_key": redacted_access_key,
                             "total_input_tokens": str(ssr_state.total_input_tokens),
                             "total_output_tokens": str(ssr_state.total_output_tokens),
@@ -629,6 +635,7 @@ def invoke_llm_with_ssr(
                     "SSR Loop exceeded maximum iterations",
                     extra={
                         "session_key": p_sessionKey,
+                        "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id,
                         "redacted_access_key": redacted_access_key,
                         "max_iterations": str(SSR_MAX_ITERATIONS),
                         "iteration_count": str(ssr_state.iteration_count),
@@ -650,6 +657,7 @@ def invoke_llm_with_ssr(
                 f"SSR loop continuing because content ({requested_keys}) requested",
                 extra={
                     "session_key": p_sessionKey,
+                    "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id,
                     "redacted_access_key": redacted_access_key,
                     "iteration_count": str(ssr_state.iteration_count),
                     "reason": "has_ssr_request is True and within max iterations",
@@ -693,6 +701,7 @@ def invoke_llm_with_ssr(
                 "Conversation exceeded maximum size",
                 extra={
                     "session_key": p_sessionKey,
+                    "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id,
                     "redacted_access_key": redacted_access_key,
                     "user_conversation_size": str(user_conversation_size),
                     "class_selection": p_Request.classSelection or "",
@@ -716,6 +725,7 @@ def invoke_llm_with_ssr(
             exc_info=True,
             extra={
                 "session_key": p_sessionKey,
+                "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id if p_SessionCache else "",
                 "redacted_access_key": redacted_access_key,
                 "error": str(e),
                 "class_selection": p_Request.classSelection if p_Request else "",

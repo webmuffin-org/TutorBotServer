@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import json
 from typing import Dict, List, Tuple, Optional, Iterator, TypedDict
+import uuid
 
 
 # Type definitions for messages
@@ -38,57 +39,68 @@ ConversationHistory = List[Message]
 RoleContentTuple = Tuple[str, str]
 
 
-class SessionCache:
-    def __init__(self, session_key: str, data: SessionData) -> None:
-        self.m_session_key: str = session_key
-        self.m_data: SessionData = data
-        self.m_last_update: datetime = datetime.utcnow()
-        self.m_simpleCounterLLMConversation: "SimpleCounterLLMConversation" = (
-            SimpleCounterLLMConversation()
-        )
-
-    def update(self, data: SessionData) -> None:
-        self.m_data.update(data)
-        self.m_last_update = datetime.utcnow()
-
-
-class SessionCacheManager:
-    def __init__(self, idle_timeout: timedelta = timedelta(hours=4)) -> None:
-        self.sessions: Dict[str, SessionCache] = {}
-        self.idle_timeout: timedelta = idle_timeout
-
-    def add_session(self, session_key: str, data: SessionData) -> None:
-        session = SessionCache(session_key, data)
-        self.sessions[session_key] = session
-
-    def get_session(self, session_key: str) -> SessionCache:
-        session = self.sessions.get(session_key)
-        if session is None:
-            raise KeyError(f"Session with key {session_key} not found")
-        return session
-
-    def remove_session(self, session_key: str) -> None:
-        if session_key in self.sessions:
-            del self.sessions[session_key]
-
-    def cleanup_idle_sessions(self) -> None:
-        now = datetime.utcnow()
-        idle_sessions: List[str] = [
-            key
-            for key, session in self.sessions.items()
-            if now - session.m_last_update > self.idle_timeout
-        ]
-        for session_key in idle_sessions:
-            self.remove_session(session_key)
-
-
-session_manager: SessionCacheManager = SessionCacheManager()
+class ConversationState(TypedDict):
+    """State for a single conversation stored in history."""
+    messages: ConversationHistory
+    message_id_counter: int
 
 
 class SimpleCounterLLMConversation:
-    def __init__(self) -> None:
-        self.conversation: ConversationHistory = []
-        self.message_id_counter: int = 1  # Initialize message ID counter
+    """
+    Manages conversations stored in a shared conversation history dictionary.
+    All conversations are stored in the history - there is no separate "current" conversation.
+    """
+
+    def __init__(self, conversation_history: Dict[str, ConversationState]) -> None:
+        """
+        Initialize with a reference to the shared conversation history.
+        :param conversation_history: Shared dict storing all conversations by ID
+        """
+        self._conversation_history = conversation_history
+        self._current_conversation_id: str = self._generate_conversation_id()
+        # Initialize the current conversation in history
+        self._conversation_history[self._current_conversation_id] = {
+            "messages": [],
+            "message_id_counter": 1
+        }
+
+    @staticmethod
+    def _generate_conversation_id() -> str:
+        """Generate a unique conversation ID."""
+        return str(uuid.uuid4())
+
+    @property
+    def conversation_id(self) -> str:
+        """Get the current conversation ID."""
+        return self._current_conversation_id
+
+    @property
+    def conversation(self) -> ConversationHistory:
+        """Get the current conversation's messages."""
+        state = self._conversation_history.get(self._current_conversation_id)
+        if state is None:
+            return []
+        return state["messages"]
+
+    @property
+    def message_id_counter(self) -> int:
+        """Get the current conversation's message ID counter."""
+        state = self._conversation_history.get(self._current_conversation_id)
+        if state is None:
+            return 1
+        return state["message_id_counter"]
+
+    def _increment_counter(self) -> int:
+        """Increment and return the message ID counter."""
+        state = self._conversation_history.get(self._current_conversation_id)
+        if state is None:
+            return 1
+        counter = state["message_id_counter"]
+        state["message_id_counter"] = counter + 1
+        # Reset counter if it's too high
+        if state["message_id_counter"] > 1e9:
+            state["message_id_counter"] = 1
+        return counter
 
     def add_message(self, role: str, content: str, conv_content: Optional[str]) -> None:
         """
@@ -97,25 +109,47 @@ class SimpleCounterLLMConversation:
         :param content: The content of the message.
         :param conv_content: if not null, then add to download for user facing conversation
         """
+        state = self._conversation_history.get(self._current_conversation_id)
+        if state is None:
+            # Re-initialize if somehow missing
+            self._conversation_history[self._current_conversation_id] = {
+                "messages": [],
+                "message_id_counter": 1
+            }
+            state = self._conversation_history[self._current_conversation_id]
+
         message: Message = {
-            "id": self.message_id_counter,
+            "id": self._increment_counter(),
             "timestamp": datetime.now().isoformat(),
             "role": role,
             "content": content,
             "conv_content": conv_content,
         }
-        self.conversation.append(message)
-        self.message_id_counter += 1  # Increment the counter for the next message
-        # Reset counter if it's too high; adjust this limit as needed
-        if self.message_id_counter > 1e9:
-            self.message_id_counter = 1
+        state["messages"].append(message)
 
     def clear(self) -> None:
         """
-        Clears the conversation and resets the message ID counter.
+        Starts a new conversation. The old conversation remains in history.
+        Generates a new conversation ID and initializes empty state.
         """
-        self.conversation.clear()
-        self.message_id_counter = 1  # Reset counter
+        # Generate new conversation ID (old one stays in history)
+        self._current_conversation_id = self._generate_conversation_id()
+        # Initialize the new conversation in history
+        self._conversation_history[self._current_conversation_id] = {
+            "messages": [],
+            "message_id_counter": 1
+        }
+
+    def switch_to_conversation(self, conversation_id: str) -> bool:
+        """
+        Switch to an existing conversation by ID.
+        :param conversation_id: The ID of the conversation to switch to
+        :return: True if switch was successful, False if conversation doesn't exist
+        """
+        if conversation_id in self._conversation_history:
+            self._current_conversation_id = conversation_id
+            return True
+        return False
 
     def to_string(self) -> str:
         """
@@ -197,7 +231,7 @@ class SimpleCounterLLMConversation:
         """
         Returns an iterator over a snapshot of the conversation list.
         """
-        return iter(self.conversation.copy())
+        return iter(list(self.conversation))
 
     def get_user_questions_as_string(self) -> str:
         """
@@ -229,11 +263,12 @@ class SimpleCounterLLMConversation:
         Removes the oldest pair of user and assistant messages from the conversation.
         This helps conserve space while keeping the conversation balanced.
         """
+        messages = self.conversation
         user_index: Optional[int] = None
         assistant_index: Optional[int] = None
 
         # Find the indices of the oldest 'user' and 'assistant' messages
-        for i, message in enumerate(self.conversation):
+        for i, message in enumerate(messages):
             if message["role"] == "user" and user_index is None:
                 user_index = i
             elif message["role"] == "assistant" and assistant_index is None:
@@ -246,11 +281,11 @@ class SimpleCounterLLMConversation:
         if user_index is not None and assistant_index is not None:
             # Remove the assistant message first if it comes before the user in the list
             if assistant_index < user_index:
-                self.conversation.pop(assistant_index)
-                self.conversation.pop(user_index - 1)  # Adjust for shifted index
+                messages.pop(assistant_index)
+                messages.pop(user_index - 1)  # Adjust for shifted index
             else:
-                self.conversation.pop(user_index)
-                self.conversation.pop(assistant_index - 1)  # Adjust for shifted index
+                messages.pop(user_index)
+                messages.pop(assistant_index - 1)  # Adjust for shifted index
 
     def get_serializable_conversation(self) -> List[Message]:
         """
@@ -282,20 +317,21 @@ class SimpleCounterLLMConversation:
         Returns:
             A dictionary with conversation summary information.
         """
-        user_messages = [msg for msg in self.conversation if msg["role"] == "user"]
+        messages = self.conversation
+        user_messages = [msg for msg in messages if msg["role"] == "user"]
         assistant_messages = [
-            msg for msg in self.conversation if msg["role"] == "assistant"
+            msg for msg in messages if msg["role"] == "assistant"
         ]
 
         return {
-            "total_messages": len(self.conversation),
+            "total_messages": len(messages),
             "user_messages_count": len(user_messages),
             "assistant_messages_count": len(assistant_messages),
             "conversation_start": (
-                self.conversation[0]["timestamp"] if self.conversation else None
+                messages[0]["timestamp"] if messages else None
             ),
             "conversation_latest": (
-                self.conversation[-1]["timestamp"] if self.conversation else None
+                messages[-1]["timestamp"] if messages else None
             ),
             "messages": [
                 {
@@ -309,9 +345,70 @@ class SimpleCounterLLMConversation:
                     ),
                     "has_conv_content": msg["conv_content"] is not None,
                 }
-                for msg in self.conversation
+                for msg in messages
             ],
         }
 
 
-global_conversation: SimpleCounterLLMConversation = SimpleCounterLLMConversation()
+class SessionCache:
+    def __init__(self, session_key: str, data: SessionData) -> None:
+        self.m_session_key: str = session_key
+        self.m_data: SessionData = data
+        self.m_last_update: datetime = datetime.utcnow()
+        # Single source of truth: all conversations stored here by conversation_id
+        self.m_conversation_history: Dict[str, ConversationState] = {}
+        # Conversation manager that works with the shared history
+        self.m_simpleCounterLLMConversation: SimpleCounterLLMConversation = (
+            SimpleCounterLLMConversation(self.m_conversation_history)
+        )
+
+    def update(self, data: SessionData) -> None:
+        self.m_data.update(data)
+        self.m_last_update = datetime.utcnow()
+
+    def get_conversation_by_id(self, conversation_id: str) -> Optional[ConversationHistory]:
+        """Retrieve a conversation by its ID from history."""
+        state = self.m_conversation_history.get(conversation_id)
+        if state is not None:
+            return list(state["messages"])
+        return None
+
+    def get_all_conversation_ids(self) -> List[str]:
+        """Get all conversation IDs stored in history."""
+        return list(self.m_conversation_history.keys())
+
+
+class SessionCacheManager:
+    def __init__(self, idle_timeout: timedelta = timedelta(hours=1)) -> None:
+        self.sessions: Dict[str, SessionCache] = {}
+        self.idle_timeout: timedelta = idle_timeout
+
+    def add_session(self, session_key: str, data: SessionData) -> None:
+        session = SessionCache(session_key, data)
+        self.sessions[session_key] = session
+
+    def get_session(self, session_key: str) -> SessionCache:
+        session = self.sessions.get(session_key)
+        if session is None:
+            raise KeyError(f"Session with key {session_key} not found")
+        return session
+
+    def remove_session(self, session_key: str) -> None:
+        if session_key in self.sessions:
+            del self.sessions[session_key]
+
+    def cleanup_idle_sessions(self) -> None:
+        now = datetime.utcnow()
+        idle_sessions: List[str] = [
+            key
+            for key, session in self.sessions.items()
+            if now - session.m_last_update > self.idle_timeout
+        ]
+        for session_key in idle_sessions:
+            self.remove_session(session_key)
+
+
+session_manager: SessionCacheManager = SessionCacheManager()
+
+
+global_conversation: SimpleCounterLLMConversation = SimpleCounterLLMConversation({})

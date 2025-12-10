@@ -14,10 +14,10 @@
         async function copyRawMarkdown(textareaId) {
             const textarea = document.getElementById(textareaId);
             if (!textarea) return;
-            
+
             const markdownText = textarea.value;
             const button = event.target.closest('.copy-button');
-            
+
             // Try modern clipboard API first
             let copySuccess = false;
             if (navigator.clipboard && window.isSecureContext) {
@@ -28,7 +28,7 @@
                     console.warn('Clipboard API failed, trying fallback');
                 }
             }
-            
+
             // Fallback to older method
             if (!copySuccess) {
                 try {
@@ -38,12 +38,15 @@
                     textarea.style.top = '0';
                     textarea.style.opacity = '1';
                     textarea.style.zIndex = '9999';
-                    
+                    textarea.style.display = 'block';
+
                     textarea.select();
-                    textarea.setSelectionRange(0, 99999);
+                    // Use the actual text length instead of arbitrary limit
+                    textarea.setSelectionRange(0, markdownText.length);
                     copySuccess = document.execCommand('copy');
-                    
+
                     // Hide textarea again
+                    textarea.style.display = 'none';
                     textarea.style.position = 'absolute';
                     textarea.style.left = '-9999px';
                     textarea.style.opacity = '0';
@@ -52,7 +55,7 @@
                     console.error('Failed to copy text: ', err);
                 }
             }
-            
+
             // Visual feedback
             if (button) {
                 const originalHtml = button.innerHTML;
@@ -65,7 +68,7 @@
                         alert('Copy failed. The markdown text is: \\n\\n' + markdownText);
                     }, 100);
                 }
-                
+
                 setTimeout(() => {
                     button.innerHTML = originalHtml;
                 }, 2000);

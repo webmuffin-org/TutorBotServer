@@ -118,9 +118,11 @@ class LokiHandler(logging.Handler):
             detail["level"] = record.levelname.lower()
             detail["message"] = record.getMessage()
             
-            # 4) ensure session_key is always present
+            # 4) ensure session_key and conversation_id are always present
             if "session_key" not in detail:
                 detail["session_key"] = ""
+            if "conversation_id" not in detail:
+                detail["conversation_id"] = ""
 
             # 5) Create JSON log message with all details
             log_json = json.dumps(detail)

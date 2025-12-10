@@ -7,6 +7,9 @@
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/conversation.css">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <!-- pdfmake for client-side PDF generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/pdfmake.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.10/vfs_fonts.js"></script>
 </head>
 
 <body>
@@ -14,6 +17,7 @@
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="/static/timestamp-utils.js"></script>
   <script src="/static/markdown-utils.js"></script>
+  <script src="/static/pdf-export.js"></script>
 
   <div class="container">
     <div class="header"> <!-- Header section with title and instructions -->
@@ -674,14 +678,18 @@
       });
 
       document.getElementById("requestConversationDownload").addEventListener('click', async () => {
-        const email = document.getElementById('email').value;
+        const downloadButton = document.getElementById('requestConversationDownload');
+        const originalText = downloadButton.textContent;
 
         const classDropdown = document.getElementById('classDropdown');
         const lessonDropdown = document.getElementById('lessonDropdown');
         const actionPlanDropdown = document.getElementById('actionPlanDropdown');
 
         try {
-          const response = await fetch(`${baseURL}/download-conversation`, {
+          downloadButton.disabled = true;
+          downloadButton.textContent = 'Generating PDF...';
+
+          const response = await fetch(`${baseURL}/conversation-data`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -691,23 +699,20 @@
             }),
             credentials: 'include'
           });
-          const blob = await response.blob();
-
-          const filename = response.headers.get('Content-Disposition').split('filename=')[1];
-
-          const link = document.createElement("a");
-          link.href = URL.createObjectURL(blob);
-
-          link.download = filename;
-          link.click();
 
           if (!response.ok) {
             throw new Error(`${response.statusText}`);
           }
 
-        } catch (error) {
+          const data = await response.json();
+          PDFExport.download(data);
 
-          console.error('Error downloading conversatioin:', error);
+        } catch (error) {
+          console.error('Error generating PDF:', error);
+          alert('Failed to generate PDF. Please try again.');
+        } finally {
+          downloadButton.disabled = false;
+          downloadButton.textContent = originalText;
         }
       });
 

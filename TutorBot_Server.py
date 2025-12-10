@@ -38,7 +38,7 @@ from constants import (  # noqa: E402
 )
 
 
-from utils.html_export import HTMLConversationExporter  # noqa: E402
+from utils.html_export import HTMLConversationExporter, ConversationFormatter  # noqa: E402
 from utils.email import send_email  # noqa: E402
 from utils.llm import validate_access_key, redact_access_key  # noqa: E402
 from utils.filesystem import (  # noqa: E402
@@ -478,6 +478,7 @@ async def get_class_configuration(class_directory: str, request: Request):
             "Loaded available files for class directory",
             extra={
                 "session_key": session_key,
+                "conversation_id": session_cache.m_simpleCounterLLMConversation.conversation_id,
                 "class_directory": class_directory,
                 "lessons": str(lessons),
                 "action_plans": str(action_plans),
@@ -487,6 +488,7 @@ async def get_class_configuration(class_directory: str, request: Request):
             },
         )
 
+        # Start a new conversation (old one automatically stays in history)
         session_cache.m_simpleCounterLLMConversation.clear()
 
         return JSONResponse(content={"lessons": lessons, "action_plans": action_plans})
@@ -514,6 +516,7 @@ async def clear_conversation(request: Request):
 
     session_cache = session_manager.get_session(session_key)
 
+    # Start a new conversation (old one automatically stays in history)
     session_cache.m_simpleCounterLLMConversation.clear()
 
     return JSONResponse(content={"message": "Conversation cleared"})
@@ -563,6 +566,7 @@ async def send_conversation(request: Request, payload: dict):
             "HTML created successfully for conversation email",
             extra={
                 "session_key": session_key,
+                "conversation_id": session_cache.m_simpleCounterLLMConversation.conversation_id,
                 "class_selection": class_name,
                 "lesson": lesson,
                 "action_plan": action_plan,
@@ -594,6 +598,7 @@ async def send_conversation(request: Request, payload: dict):
             "Error creating HTML for conversation email",
             extra={
                 "session_key": session_key,
+                "conversation_id": session_cache.m_simpleCounterLLMConversation.conversation_id if session_cache else "",
                 "error": str(e),
                 "class_selection": class_name,
                 "lesson": lesson,
@@ -632,6 +637,7 @@ async def download_conversation(request: Request, payload: dict):
             "HTML created successfully for conversation download",
             extra={
                 "session_key": session_key,
+                "conversation_id": session_cache.m_simpleCounterLLMConversation.conversation_id,
                 "class_selection": class_name or "",
                 "lesson": lesson or "",
                 "action_plan": action_plan or "",
@@ -654,6 +660,7 @@ async def download_conversation(request: Request, payload: dict):
             "Error creating HTML for conversation download",
             extra={
                 "session_key": session_key,
+                "conversation_id": session_cache.m_simpleCounterLLMConversation.conversation_id if session_cache else "",
                 "error": str(e),
                 "class_selection": class_name or "",
                 "lesson": lesson or "",
@@ -661,6 +668,104 @@ async def download_conversation(request: Request, payload: dict):
             },
         )
         raise HTTPException(status_code=500, detail="Error creating HTML")
+
+
+@app.post("/conversation-data")
+async def get_conversation_data(request: Request, payload: dict):
+    """Return conversation data as JSON for client-side PDF generation."""
+    session_key = request.cookies.get("session_key")
+
+    class_name = payload.get("classSelection") or "Unknown"
+    lesson = payload.get("lesson") or "Unknown"
+    action_plan = payload.get("actionPlan") or "Unknown"
+
+    # Get session cache
+    if session_key is None:
+        raise HTTPException(status_code=401, detail="Session key is missing")
+
+    session_cache = session_manager.get_session(session_key)
+    if session_cache is None:
+        raise HTTPException(status_code=404, detail="Could not locate Session Key")
+
+    try:
+        # Get full conversation messages (includes timestamps)
+        full_conversation = (
+            session_cache.m_simpleCounterLLMConversation.conversation
+        )
+
+        messages = []
+        for msg in full_conversation:
+            role = msg.get("role")
+            conv_content = msg.get("conv_content")
+            timestamp = msg.get("timestamp")
+
+            # Only include messages with conv_content (user-facing conversation)
+            if role not in ["user", "assistant"] or conv_content is None:
+                continue
+
+            message = {
+                "role": role,
+                "content": conv_content,
+                "token_info": None,
+                "timestamp": timestamp,
+            }
+
+            if role == "assistant":
+                # Use existing parse_bot_response logic
+                token_info, clean_content = ConversationFormatter.parse_bot_response(
+                    conv_content
+                )
+                message["content"] = clean_content
+                message["token_info"] = token_info
+
+            messages.append(message)
+
+        from datetime import datetime
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        logger.info(
+            "Conversation data retrieved for PDF generation",
+            extra={
+                "session_key": session_key,
+                "conversation_id": session_cache.m_simpleCounterLLMConversation.conversation_id,
+                "message_count": len(messages),
+                "class_selection": class_name,
+                "lesson": lesson,
+                "action_plan": action_plan,
+            },
+        )
+
+        # Get the conversation ID (resets when conversation is cleared)
+        conversation_id = session_cache.m_simpleCounterLLMConversation.conversation_id
+
+        return JSONResponse(
+            content={
+                "messages": messages,
+                "metadata": {
+                    "class_name": class_name,
+                    "lesson": lesson,
+                    "action_plan": action_plan,
+                    "timestamp": timestamp,
+                    "session_id": session_key,
+                    "conversation_id": conversation_id,
+                },
+            }
+        )
+
+    except Exception as e:
+        logger.error(
+            "Error retrieving conversation data",
+            extra={
+                "session_key": session_key,
+                "conversation_id": session_cache.m_simpleCounterLLMConversation.conversation_id if session_cache else "",
+                "error": str(e),
+                "class_selection": class_name,
+                "lesson": lesson,
+                "action_plan": action_plan,
+            },
+        )
+        raise HTTPException(status_code=500, detail="Error retrieving conversation data")
 
 
 if __name__ == "__main__":
