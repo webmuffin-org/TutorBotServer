@@ -408,7 +408,7 @@ def invoke_llm_with_ssr(
     try:
         #Feed in the original request
         RequestText = p_Request.text
-        p_SessionCache.m_simpleCounterLLMConversation.add_message("user", RequestText, None)
+        p_SessionCache.m_simpleCounterLLMConversation.add_message("user", RequestText, RequestText)
 
         SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP: List[str] = []
 
