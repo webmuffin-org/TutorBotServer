@@ -148,8 +148,8 @@ def _calculate_overall_status(
                     has_non_essential_down = True
                 continue
 
-            # Check latest heartbeat status
-            latest_status = monitor_heartbeats[0].get("status")
+            # Check latest heartbeat status (last element is most recent)
+            latest_status = monitor_heartbeats[-1].get("status")
             if latest_status != UPTIME_KUMA_STATUS_UP:
                 if criticality == "essential":
                     has_essential_down = True
