@@ -804,8 +804,11 @@ async def get_status_endpoint(request: Request) -> JSONResponse:
     if not session_key:
         raise HTTPException(status_code=401, detail="Session key is missing")
 
-    session_cache = session_manager.get_session(session_key)
-    if not session_cache:
+    try:
+        session_cache = session_manager.get_session(session_key)
+        if not session_cache:
+            raise HTTPException(status_code=404, detail="Session not found")
+    except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
 
     result = await get_status()
