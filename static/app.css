@@ -88,7 +88,11 @@ h1 {
 .header h1 {
 	color: #007bff;
 	font-size: 28px;
-	margin: 0 0 10px 0;
+	margin: 0;
+}
+
+.header-title-row + p {
+	margin-top: 10px;
 }
 
 /* Reset margins only for non-conversation elements */
@@ -399,4 +403,112 @@ dialog::backdrop {
 	margin-top: 1rem;
 	display: none;
 	text-align: center;
+}
+
+/* =============================================================================
+   Status Indicator Styles
+   ============================================================================= */
+
+.header-title-row {
+	display: inline-flex;
+	flex-direction: row;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	flex-wrap: nowrap;
+}
+
+.header-title-row h1 {
+	flex-shrink: 0;
+	display: inline;
+	width: auto;
+}
+
+.status-indicator {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 4px;
+	border-radius: 6px;
+	text-decoration: none;
+	transition: all 0.2s ease;
+	flex-shrink: 0;
+	width: 28px;
+	height: 28px;
+}
+
+.status-indicator:hover {
+	background-color: #f0f0f0;
+	color: #333;
+}
+
+.status-icon {
+	width: 20px;
+	height: 20px;
+	min-width: 20px;
+	min-height: 20px;
+	max-width: 20px;
+	max-height: 20px;
+	transition: opacity 0.2s ease, stroke 0.3s ease;
+	flex-shrink: 0;
+	stroke: #6c757d; /* Gray default, updated by JS */
+}
+
+.status-icon.status-pulse {
+	animation: statusPulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.status-dot {
+	position: absolute;
+	top: 2px;
+	right: 2px;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background-color: #6c757d;
+	border: 1.5px solid white;
+	transition: background-color 0.3s ease;
+}
+
+.status-dot.status-pulse {
+	animation: statusPulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes statusPulse {
+	0%, 100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.4;
+	}
+}
+
+/* Mobile responsiveness */
+@media (max-width: 600px) {
+	.header-title-row {
+		gap: 4px;
+	}
+
+	.status-indicator {
+		padding: 3px;
+		width: 24px;
+		height: 24px;
+	}
+
+	.status-icon {
+		width: 16px;
+		height: 16px;
+		min-width: 16px;
+		min-height: 16px;
+		max-width: 16px;
+		max-height: 16px;
+	}
+
+	.status-dot {
+		width: 6px;
+		height: 6px;
+		top: 1px;
+		right: 1px;
+	}
 }

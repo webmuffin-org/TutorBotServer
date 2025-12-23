@@ -35,10 +35,15 @@ from constants import (  # noqa: E402
     frequency_penalty,
     presence_penalty,
     validate_ssr_configuration,
+    STATUS_CACHE_MAX_AGE,
+    STATUS_CACHE_STALE_WHILE_REVALIDATE,
 )
 
 
-from utils.html_export import HTMLConversationExporter, ConversationFormatter  # noqa: E402
+from utils.html_export import (  # noqa: E402
+    HTMLConversationExporter,
+    ConversationFormatter,
+)
 from utils.email import send_email  # noqa: E402
 from utils.llm import validate_access_key, redact_access_key  # noqa: E402
 from utils.filesystem import (  # noqa: E402
@@ -47,6 +52,7 @@ from utils.filesystem import (  # noqa: E402
 )
 from SessionCache import SessionCacheManager, session_manager, SessionData  # noqa: E402
 from LLM_Handler import invoke_llm_with_ssr  # noqa: E402
+from utils.status import get_status  # noqa: E402
 
 
 def get_session_manager() -> SessionCacheManager:
@@ -87,7 +93,12 @@ app.add_middleware(
 def startup_event():
     logger.info(
         "Application startup",
-        extra={"session_key": "", "class_selection": "", "lesson": "", "action_plan": ""},
+        extra={
+            "session_key": "",
+            "class_selection": "",
+            "lesson": "",
+            "action_plan": "",
+        },
     )
     logger.info(
         "Model configuration",
@@ -147,7 +158,12 @@ def startup_event():
 def shutdown_event():
     logger.info(
         "Application shutdown",
-        extra={"session_key": "", "class_selection": "", "lesson": "", "action_plan": ""},
+        extra={
+            "session_key": "",
+            "class_selection": "",
+            "lesson": "",
+            "action_plan": "",
+        },
     )
 
 
@@ -189,17 +205,8 @@ async def check_session_key(request: Request, call_next):
     if request.url.path not in ["/set-cookie/", "/favicon.ico", "/"]:
         session_key = request.cookies.get("session_key")
 
-        logger.info(
-            "Session key in middleware",
-            extra={
-                "session_key": session_key or "undefined",
-                "class_selection": "",
-                "lesson": "",
-                "action_plan": "",
-            },
-        )
         if not session_key:
-            logger.info(
+            logger.error(
                 "Session key missing in request",
                 extra={
                     "request_path": request.url.path,
@@ -261,7 +268,9 @@ async def favicon():
 
 
 # Define your chatbot logic
-def generate_response(p_session_key: str, p_Request: PyMessage, redacted_access_key: str) -> str:
+def generate_response(
+    p_session_key: str, p_Request: PyMessage, redacted_access_key: str
+) -> str:
 
     sessionCache = session_manager.get_session(p_session_key)
 
@@ -305,7 +314,9 @@ def generate_response(p_session_key: str, p_Request: PyMessage, redacted_access_
                 },
             )
             return "You must select an action plan to use this Bot"
-        return invoke_llm_with_ssr(sessionCache, p_Request, p_session_key, redacted_access_key)
+        return invoke_llm_with_ssr(
+            sessionCache, p_Request, p_session_key, redacted_access_key
+        )
     else:
         response = "Received unknown session key"
         logger.error(
@@ -598,7 +609,11 @@ async def send_conversation(request: Request, payload: dict):
             "Error creating HTML for conversation email",
             extra={
                 "session_key": session_key,
-                "conversation_id": session_cache.m_simpleCounterLLMConversation.conversation_id if session_cache else "",
+                "conversation_id": (
+                    session_cache.m_simpleCounterLLMConversation.conversation_id
+                    if session_cache
+                    else ""
+                ),
                 "error": str(e),
                 "class_selection": class_name,
                 "lesson": lesson,
@@ -660,7 +675,11 @@ async def download_conversation(request: Request, payload: dict):
             "Error creating HTML for conversation download",
             extra={
                 "session_key": session_key,
-                "conversation_id": session_cache.m_simpleCounterLLMConversation.conversation_id if session_cache else "",
+                "conversation_id": (
+                    session_cache.m_simpleCounterLLMConversation.conversation_id
+                    if session_cache
+                    else ""
+                ),
                 "error": str(e),
                 "class_selection": class_name or "",
                 "lesson": lesson or "",
@@ -689,9 +708,7 @@ async def get_conversation_data(request: Request, payload: dict):
 
     try:
         # Get full conversation messages (includes timestamps)
-        full_conversation = (
-            session_cache.m_simpleCounterLLMConversation.conversation
-        )
+        full_conversation = session_cache.m_simpleCounterLLMConversation.conversation
 
         messages = []
         for msg in full_conversation:
@@ -758,28 +775,72 @@ async def get_conversation_data(request: Request, payload: dict):
             "Error retrieving conversation data",
             extra={
                 "session_key": session_key,
-                "conversation_id": session_cache.m_simpleCounterLLMConversation.conversation_id if session_cache else "",
+                "conversation_id": (
+                    session_cache.m_simpleCounterLLMConversation.conversation_id
+                    if session_cache
+                    else ""
+                ),
                 "error": str(e),
                 "class_selection": class_name,
                 "lesson": lesson,
                 "action_plan": action_plan,
             },
         )
-        raise HTTPException(status_code=500, detail="Error retrieving conversation data")
+        raise HTTPException(
+            status_code=500, detail="Error retrieving conversation data"
+        )
+
+
+@app.get("/status/")
+async def get_status_endpoint(request: Request) -> JSONResponse:
+    """
+    Proxy endpoint for fetching system status from Uptime Kuma.
+
+    Caching: Cache-Control headers (30s max-age, 60s stale-while-revalidate)
+    Requires authentication via session cookie to prevent abuse.
+    """
+    session_key = request.cookies.get("session_key")
+
+    if not session_key:
+        raise HTTPException(status_code=401, detail="Session key is missing")
+
+    session_cache = session_manager.get_session(session_key)
+    if not session_cache:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    result = await get_status()
+
+    response = JSONResponse(content=result)
+    response.headers["Cache-Control"] = (
+        f"private, max-age={STATUS_CACHE_MAX_AGE}, "
+        f"stale-while-revalidate={STATUS_CACHE_STALE_WHILE_REVALIDATE}"
+    )
+
+    return response
 
 
 if __name__ == "__main__":
     # Initialize logging system
     logger.info(
         "Logging setup configured and starting TutorBot_Server",
-        extra={"session_key": "", "class_selection": "", "lesson": "", "action_plan": ""},
+        extra={
+            "session_key": "",
+            "class_selection": "",
+            "lesson": "",
+            "action_plan": "",
+        },
     )
 
     # Validate SSR configuration
     validate_ssr_configuration()
     logger.info(
         "SSR configuration validation completed",
-        extra={"session_key": "", "class_selection": "", "lesson": "", "action_plan": ""},
+        extra={
+            "session_key": "",
+            "class_selection": "",
+            "lesson": "",
+            "action_plan": "",
+        },
     )
 
     uvicorn.run("TutorBot_Server:app", host="0.0.0.0", port=port)

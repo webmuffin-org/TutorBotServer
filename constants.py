@@ -1,6 +1,8 @@
 import os
 import platform
 import typing
+from typing import Dict, Optional
+from urllib.parse import urlparse
 from pydantic import SecretStr
 from utils.logger import get_logger
 
@@ -420,3 +422,66 @@ if loki_labels:
             "action_plan": "",
         },
     )
+
+# =============================================================================
+# Status Indicator Configuration
+# =============================================================================
+
+status_page_url: Optional[str] = os.getenv("STATUS_PAGE_URL")
+
+
+def _parse_status_page_url() -> tuple[Optional[str], Optional[str]]:
+    """
+    Derive base URL and slug from STATUS_PAGE_URL.
+
+    Handles URL patterns:
+    - https://status.example.com/status/{slug}
+    - https://status.example.com/{slug}
+
+    Example:
+        "https://status.example.com/status/tutorbot"
+        -> base_url: "https://status.example.com"
+        -> slug: "tutorbot"
+    """
+    if not status_page_url:
+        return None, None
+
+    parsed = urlparse(status_page_url)
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+
+    path = parsed.path.rstrip('/')
+    segments = [s for s in path.split('/') if s]
+
+    if not segments:
+        return base_url, None
+
+    slug = segments[-1]
+    return base_url, slug
+
+
+uptime_kuma_base_url, uptime_kuma_slug = _parse_status_page_url()
+
+# Cache-Control header timing (seconds)
+STATUS_CACHE_MAX_AGE: int = 30
+STATUS_CACHE_STALE_WHILE_REVALIDATE: int = 60
+
+# Status polling interval in seconds (client-side)
+STATUS_POLL_INTERVAL_SECONDS: int = 60
+
+# Group criticality mapping for status calculation
+# Essential: Any monitor down = overall status "down"
+# Non-essential: Any monitor down = overall status "degraded"
+STATUS_GROUP_CRITICALITY: Dict[str, str] = {
+    "Application": "essential",
+    "Dependencies": "essential",
+    "Observability": "non-essential",
+}
+
+# Uptime Kuma status codes
+UPTIME_KUMA_STATUS_UP: int = 1
+UPTIME_KUMA_STATUS_DOWN: int = 0
+
+
+def is_status_indicator_enabled() -> bool:
+    """Check if status indicator is properly configured."""
+    return bool(uptime_kuma_base_url and uptime_kuma_slug)

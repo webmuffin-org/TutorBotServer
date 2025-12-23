@@ -18,10 +18,20 @@
   <script src="/static/timestamp-utils.js"></script>
   <script src="/static/markdown-utils.js"></script>
   <script src="/static/pdf-export.js"></script>
+  <script src="/static/status-indicator.js"></script>
 
   <div class="container">
     <div class="header"> <!-- Header section with title and instructions -->
-      <h1>TutorBot Learning Center</h1>
+      <div class="header-title-row">
+        <a id="statusIndicator" class="status-indicator" target="_blank" rel="noopener noreferrer" title="Checking Status...">
+          <!-- Signal pulse icon -->
+          <svg class="status-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.348 14.651a3.75 3.75 0 010-5.303m5.304 0a3.75 3.75 0 010 5.303m-7.425 2.122a6.75 6.75 0 010-9.546m9.546 0a6.75 6.75 0 010 9.546M5.106 18.894c-3.808-3.808-3.808-9.98 0-13.789m13.788 0c3.808 3.808 3.808 9.981 0 13.789M12 12h.008v.008H12V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"/>
+          </svg>
+          <span class="status-dot"></span>
+        </a>
+        <h1>TutorBot Learning Center</h1>
+      </div>
       <p>Select your class from the dropdown below and then select the lesson you would like to work on.</p>
       <div>
         <label style="font-weight: bold;" for="accessKey">Access Key:</label>
@@ -120,6 +130,12 @@
     function initializeApp() {
       setCookie() // Set a session cookie
         .then(fetchClasses) // Fetch available classes after setting the cookie
+        .then(() => {
+          // Initialize status indicator after session is established
+          if (typeof statusIndicator !== 'undefined') {
+            statusIndicator.initialize('statusIndicator');
+          }
+        })
         .catch(error => console.error('Initialization error:', error)); // Log any initialization errors
       addEventListeners(); // Add event listeners for user interactions
     }
