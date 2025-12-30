@@ -251,7 +251,7 @@ class SSRContentLoader:
                     },
                 )
                 loaded_contents.append(
-                    f'<ssrcontent name="{content_key}">No Content by this name Exists</ssrcontent>\n')
+                    f'<SSR_CONTENT name="{content_key}">No Content by this name Exists</SSR_CONTENT>\n')
                 loaded_file_names.append(content_key)
 
                 continue
@@ -263,7 +263,7 @@ class SSRContentLoader:
                 or running_size + content_size <= self.max_size_bytes
             ):
                 loaded_contents.append(
-                    f'\n<ssrcontent name="{content_key}">\n{content}\n</ssrcontent>\n')
+                    f'\n<SSR_CONTENT name="{content_key}">\n{content}\n</SSR_CONTENT>\n')
                 loaded_file_names.append(content_key)
                 running_size += content_size
             else:
@@ -280,9 +280,9 @@ class SSRContentLoader:
                     },
                 )
                 loaded_contents.append(
-                    f'<ssrcontent name="{content_key}">Failed to Load this because SSR Content size exceeded.</ssrcontent>\n')
+                    f'<SSR_CONTENT name="{content_key}">Failed to Load this because SSR Content size exceeded.</SSR_CONTENT>\n')
 
-        xml_content = f'<ssrcontents>{"".join(loaded_contents)}</ssrcontents>'
+        xml_content = f'<SSR_CONTENTS>{"".join(loaded_contents)}</SSR_CONTENTS>'
         status_message = (
             f'Loaded SSR Content {",".join(loaded_file_names)} for this request only.')
 
