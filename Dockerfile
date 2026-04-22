@@ -9,6 +9,6 @@ RUN pip install --upgrade pip
 RUN pip install --no-cache-dir --upgrade -r /code/requirements-unix.txt
 
 
-EXPOSE 8000
+EXPOSE 3000
 
 CMD ["python", "TutorBot_Server.py"]
