@@ -68,6 +68,17 @@
           </option>
         </select>
       </div>
+      <div>
+        <label for="providerDropdown" style="font-weight: bold;">Provider:</label>
+        <select id="providerDropdown">
+          <option value="">Default</option>
+        </select>
+
+        <label for="modelDropdown" style="font-weight: bold;">Model:</label>
+        <select id="modelDropdown">
+          <option value="">Default</option>
+        </select>
+      </div>
     </div>
     <!-- Chat area for interaction -->
     <div class="chat-area">
@@ -130,6 +141,7 @@
     function initializeApp() {
       setCookie() // Set a session cookie
         .then(fetchClasses) // Fetch available classes after setting the cookie
+        .then(fetchProviders) // Fetch available providers
         .then(() => {
           // Initialize status indicator after session is established
           if (typeof statusIndicator !== 'undefined') {
@@ -153,6 +165,66 @@
       } catch (error) {
         console.error('Error setting cookie:', error); // Log any errors that occur
         throw error; // Rethrow the error to be caught in the promise chain
+      }
+    }
+
+    // Function to fetch available LLM providers from the server
+    let _providerData = null;
+    async function fetchProviders() {
+      try {
+        const response = await fetch(`${baseURL}/providers/`, {
+          method: 'GET',
+          credentials: 'include'
+        });
+        if (!response.ok) throw new Error(`Failed to fetch providers: ${response.statusText}`);
+        const data = await response.json();
+        _providerData = data;
+        console.log('Providers fetched:', data);
+
+        const providerDropdown = document.getElementById('providerDropdown');
+        const modelDropdown = document.getElementById('modelDropdown');
+
+        // Populate provider dropdown with available providers
+        providerDropdown.innerHTML = '';
+        const availableProviders = data.providers.filter(p => p.available);
+
+        availableProviders.forEach(p => {
+          const option = document.createElement('option');
+          option.value = p.provider;
+          option.textContent = p.provider;
+          providerDropdown.appendChild(option);
+        });
+
+        // Pick the default if it's available; otherwise fall back to the first
+        // available provider. Prevents the provider and model dropdowns from
+        // disagreeing when the server's default provider has no API key.
+        const defaultIsAvailable = availableProviders.some(p => p.provider === data.default_provider);
+        const selectedProvider = defaultIsAvailable
+          ? data.default_provider
+          : (availableProviders[0] && availableProviders[0].provider) || '';
+        providerDropdown.value = selectedProvider;
+        updateModelDropdown(selectedProvider);
+      } catch (error) {
+        console.error('Error fetching providers:', error);
+      }
+    }
+
+    // Update the model dropdown when provider changes
+    function updateModelDropdown(providerName) {
+      if (!_providerData) return;
+      const modelDropdown = document.getElementById('modelDropdown');
+      const providerInfo = _providerData.providers.find(p => p.provider === providerName);
+      if (providerInfo && providerInfo.models) {
+        modelDropdown.innerHTML = '';
+        providerInfo.models.forEach(m => {
+          const option = document.createElement('option');
+          option.value = m;
+          option.textContent = m;
+          if (m === providerInfo.default_model) {
+            option.selected = true;
+          }
+          modelDropdown.appendChild(option);
+        });
       }
     }
 
@@ -280,6 +352,9 @@
         scrollToMessage(placeholderId);
 
         try {
+          const providerDropdown = document.getElementById('providerDropdown');
+          const modelDropdown = document.getElementById('modelDropdown');
+
           // Send request to server
           const response = await fetch(`${baseURL}/chatbot/`, {
             method: 'POST',
@@ -290,6 +365,8 @@
               classSelection: classDropdown.value,
               lesson: lessonDropdown.value,
               actionPlan: actionPlanDropdown.value,
+              provider: providerDropdown.value || null,
+              model: modelDropdown.value || null,
               userTimestamp: new Date().toISOString()
             }),
             credentials: 'include'
@@ -663,6 +740,25 @@
         }
         selectedClassId = this.value; // Update the selected class ID
         fetchClassConfiguration(); // Fetch lessons for the selected class
+      });
+
+      // Provider dropdown: update model dropdown and auto-clear conversation
+      document.getElementById('providerDropdown').addEventListener('change', function () {
+        updateModelDropdown(this.value);
+      });
+
+      // Auto-clear conversation when context changes (conundrum, action plan, provider, model)
+      // Note: class dropdown already triggers server-side clear via get_class_configuration()
+      ['lessonDropdown', 'actionPlanDropdown', 'providerDropdown', 'modelDropdown'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.addEventListener('change', function() {
+            const responseOutput = document.getElementById('responseOutput');
+            if (responseOutput && responseOutput.innerHTML.trim()) {
+              clearConversation();
+            }
+          });
+        }
       });
 
       document.getElementById('requestConversation').addEventListener('click', () => {

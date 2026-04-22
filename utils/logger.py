@@ -13,8 +13,6 @@ class LokiHandler(logging.Handler):
         self,
         service_name: str,
         url: str,
-        model_provider: str,
-        model: str,
         env: str = "dev",
         loki_labels: str = "",
         auth: Optional[Tuple[str, str]] = None,
@@ -26,25 +24,19 @@ class LokiHandler(logging.Handler):
         self.timeout = timeout
         self.auth = auth
         self.org_id = org_id
-        self.labels = self._get_labels(
-            service_name, model_provider, model, env, loki_labels
-        )
+        self.labels = self._get_labels(service_name, env, loki_labels)
 
     # ---------- helpers --------------------------------------------------
 
     def _get_labels(
         self,
         service_name: str,
-        model_provider: str,
-        model: str,
         env: str,
         loki_labels: str = "",
     ):
         """Get labels from constants."""
         lbl = {
             "service_name": service_name,
-            "model_provider": model_provider,
-            "model": model,
             "env": env,
         }
 
@@ -69,7 +61,14 @@ class LokiHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             # 1) Extract fields that should be labels
-            label_fields = ["class_selection", "lesson", "action_plan", "redacted_access_key"]
+            label_fields = [
+                "provider",
+                "model",
+                "class_selection",
+                "lesson",
+                "action_plan",
+                "redacted_access_key",
+            ]
             stream_labels = self.labels.copy()
 
             # Add dynamic labels from record
@@ -95,6 +94,8 @@ class LokiHandler(logging.Handler):
                 "name",
                 "taskName",
                 # Exclude fields that are now labels
+                "provider",
+                "model",
                 "class_selection",
                 "lesson",
                 "action_plan",
@@ -158,8 +159,6 @@ _logger_instance = None
 def setup_logger(
     name="tutorbot-server",
     level=logging.INFO,
-    model_provider="unknown",
-    model="unknown",
     env="dev",
     loki_url="",
     loki_user="",
@@ -184,8 +183,6 @@ def setup_logger(
         h = LokiHandler(
             service_name=name,
             url=loki_url,
-            model_provider=model_provider,
-            model=model,
             env=env,
             loki_labels=loki_labels,
             auth=auth,

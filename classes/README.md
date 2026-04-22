@@ -1,3 +1,3 @@
 # THIS IS A TITLE
 
-IN THIS FOLDER CLASSES WILL BE CREATED
+Classes are created in this folder.

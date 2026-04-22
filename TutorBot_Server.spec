@@ -1,8 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import copy_metadata
 
 datas = [('static', 'static'),('classes', 'classes'),('.env', '.env')]
-datas += copy_metadata('ibm-watsonx-ai')
 
 
 a = Analysis(

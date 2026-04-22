@@ -1,47 +1,57 @@
 # TutorBot Server
 
-This application is designed as a TutorBot that can Tutor anything that can be expressed in text form. It is similar to a traditional ChatBot, but provides places to inject user defined content. Here are the key features:
+This application is designed as a TutorBot that can tutor anything
+that can be expressed in text form. It is similar to a traditional
+chatbot, but provides places to inject user-defined content.
 
-1. A unique prompt parameter ordering that prevents the bot from drifting of its prompts intentions.
-2. Prebuilt Scenerio, Personality, Conundrum and ActionPlan.
-3. A conundrum file that defines content, defines restrictions and give permissions to the LLM to use or not use it's own content.
-4. Prebuilt functionality to show users what content you are defining and what is provided by the LLM.
+Here are the key features:
 
-The design is simple and can be easily modified for different use cases.
+1. A unique prompt parameter ordering that prevents the bot from
+   drifting from its prompt intentions.
+2. Prebuilt scenario, personality, conundrum, and action plan.
+3. A conundrum file that defines content, restrictions, and permissions
+   for whether the LLM can use its own content.
+4. Prebuilt functionality to show users what content you are defining
+   and what is provided by the LLM.
+
+The design is simple and can be easily modified for different use
+cases.
 
 ## Caveat
 
-1. Conversational histories are maintained through the session's life. As there grow, they increase costs. \
-   Dropping previous conversations has downsides and needs to be factored in when needed.
-2. Sessions are not cleared out. As they grow it could slow down processing, but that is unlikely for prototyping purposes
+1. Conversational histories are maintained through the session's life.
+   As they grow, they increase costs. Dropping previous conversations
+   has downsides and needs to be factored in when needed.
+2. Sessions are not cleared out. As they grow it could slow down
+   processing, but that is unlikely for prototyping purposes.
 
-## Pre requisites
+## Prerequisites
 
 ### Create virtual environment
 
-#### MacOS / Linux
+#### macOS and Linux
 
-- Provision a virtual environment, create one using the following command:
+- Provision a virtual environment using the following command:
 
 ```bash
 python -m venv .venv
 ```
 
-- Activate the virtual environment you just provisioned using the command:
+- Activate the virtual environment you just provisioned:
 
 ```bash
 source .venv/bin/activate
 ```
 
-#### Windows
+#### Windows for environment setup
 
-- Provision a virtual environment, create one using the following command:
+- Provision a virtual environment using the following command:
 
 ```bash
 python -m venv .venv
 ```
 
-- Activate the virtual environment you just provisioned using the command:
+- Activate the virtual environment you just provisioned:
 
 ```bash
 # In cmd.exe
@@ -65,88 +75,97 @@ Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 ### Install dependencies
 
-#### MacOS / Linux
+#### macOS and Linux for dependencies
 
-- Install the dependencies running the command:
+- Install the dependencies by running:
 
 ```bash
 python -m pip install -r ./requirements-unix.txt
 ```
 
-#### Windows
+#### Windows for dependencies
 
-- Install the dependencies running the command:
+- Install the dependencies by running:
 
 ```bash
 python -m pip install -r ./requirements-windows.txt
 ```
 
-### Setup environment variables
+### Set up environment variables
 
-In order to set the required secrets you need to duplicate the file `.env.example` and name it `.env` and fill its contents with the corresponding values, the environmental variables example file has a brief description of each variable.
+To set the required secrets, duplicate `.env.example`, rename it to
+`.env`, and fill its contents with the corresponding values. The
+example environment variable file includes a brief description of each
+variable.
 
-## Run the TutorBot_Server Development Server
+## Run the TutorBot_Server development server
 
-### MacOS / Linux / Windows
+### macOS, Linux, and Windows for development server
 
-In order to run the development server follow this steps:
+To run the development server, follow these steps:
 
-- Using the terminal navigate to the root directory of this repository.
-
-- Test the application by running the command:
+- Using the terminal, navigate to the root directory of this
+  repository.
+- Start the application by running:
 
 ```bash
 python ./TutorBot_Server.py
 ```
 
-- Test the application by opening the url: `http://localhost:${PORT_FROM_ENV_VARS}`
+- Open the application at `http://localhost:<PORT_FROM_ENV_VARS>`.
 
 ## Build executable bundles
 
-### MacOS / Linux / Windows
+### macOS, Linux, and Windows for executable bundles
 
-In order to get an executable bundle that includes every necessary asset follow this steps:
+To get an executable bundle that includes every necessary asset, follow
+these steps:
 
-- Using the terminal navigate to the root directory of this repository.
-- Build the executable by running the command:
+- Using the terminal, navigate to the root directory of this
+  repository.
+- Build the executable by running:
 
 ```bash
 pyinstaller TutorBot_Server.spec
 ```
 
-- Copy all of the folder and files referenced at `TutorBot_Server.spec` `a.datas` to the dist folder. Currently just the `static` folder.
-- You can now move the folder `dist` or zip it and execute it from any directory where you want.
+- Copy all folders and files referenced in `TutorBot_Server.spec`
+  under `a.datas` to the `dist` folder. Currently this is just the
+  `static` folder.
+- You can now move the `dist` folder or zip it and execute it from any
+  directory where you want.
 
-## Run the TutorBot_Server Bundle
+## Run the TutorBot_Server bundle
 
-### From MacOS / Linux
+### From macOS and Linux
 
-- Using the terminal navigate to the `dist` directory.
-- Run the command: `./TutorBot_Server`
+- Using the terminal, navigate to the `dist` directory.
+- Run `./TutorBot_Server`.
 
-### From windows
+### From Windows
 
-- Using the file explorer navigate to the `dist` directory.
+- Using File Explorer, navigate to the `dist` directory.
 - Double click `TutorBot_Server.exe`.
 
-## Update requirements files after adding dependency
+## Update requirements files after adding a dependency
 
-There are two requirements files for windows and unix based systems, every time you add a dependency you should update this files by running the following commands.
+There are two requirements files for Windows and Unix-based systems.
+Every time you add a dependency, you should update these files by
+running the following commands.
 
-### MacOS / Unix
+### macOS and Unix requirements update
 
 ```bash
 python -m pip freeze > requirements-unix.txt
 ```
 
-### Windows
+### Windows requirements update
 
 ```bash
 python -m pip freeze > requirements-windows.txt --exclude enum34
 ```
 
-## Contibutors
+## Contributors
 
-This application was written by Michael Schmidt <mike.schmidt@webmuffin.com> and Santiago Forero <biolimbo@pm.me>.
-
-.......
+This application was written by Michael Schmidt
+<mike.schmidt@webmuffin.com> and Santiago Forero <biolimbo@pm.me>.

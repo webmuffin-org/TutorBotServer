@@ -200,17 +200,18 @@ class SimpleCounterLLMConversation:
         """
         return [(message["role"], message["content"]) for message in self.conversation]
 
-    def get_user_conversation_messages(self) -> List[Tuple[str, Optional[str]]]:
+    def get_user_conversation_messages(self) -> List[Tuple[str, str]]:
         """
         Retrieves all messages from the conversation where conv_content is not None.
         Returns:
             A list of tuples, each containing the role and conv_content of each message.
         """
-        return [
-            (message["role"], message["conv_content"])
-            for message in self.conversation
-            if message.get("conv_content") is not None
-        ]
+        messages: List[Tuple[str, str]] = []
+        for message in self.conversation:
+            conv_content = message.get("conv_content")
+            if conv_content is not None:
+                messages.append((message["role"], conv_content))
+        return messages
 
     def get_total_conv_content_bytes(self) -> int:
         """

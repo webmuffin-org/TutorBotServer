@@ -1,5 +1,7 @@
+import re
+import time
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 from langchain_core.language_models import BaseChatModel
@@ -7,8 +9,7 @@ from langchain_core.messages import BaseMessage
 
 from constants import (
     model_provider,
-    model,
-    api_key,
+    default_model,
     max_tokens,
     max_conversation_tokens,
     temperature,
@@ -17,8 +18,7 @@ from constants import (
     presence_penalty,
     max_retries,
     timeout,
-    ibm_project_id,
-    ibm_url,
+    provider_config,
     SSR_MAX_ITERATIONS,
     SSR_CONTENT_SIZE_LIMIT_TOKENS,
     BYTES_PER_TOKEN_ESTIMATE,
@@ -41,17 +41,69 @@ logger = get_logger()
 
 
 def extract_message_content(message: BaseMessage) -> str:
-    """Safely extract content from BaseMessage, handling both string and list content."""
+    """Safely extract content from BaseMessage, handling both string and list content.
+
+    LangChain content parts can be strings or dicts (e.g. Gemini returns
+    {'type': 'text', 'text': '...', 'extras': {...}}). Only the 'text' field
+    is user-visible; 'extras' (signatures, thought metadata) must be dropped.
+    """
     if isinstance(message.content, str):
         return message.content
-    elif isinstance(message.content, list):
-        # For list content, join all string elements
-        return " ".join(str(item) for item in message.content)
-    else:
-        return str(message.content) if message.content else ""
+    if isinstance(message.content, list):
+        parts = []
+        for item in message.content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return " ".join(parts)
+    return str(message.content) if message.content else ""
 
 
-LastResponse = ""
+def strip_markdown_fencing(text: str) -> str:
+    """Strip markdown code fencing from LLM responses.
+
+    Handles two patterns:
+    1. Entire response is fenced:
+        ```xml
+        <content/>
+        ```
+    2. Preamble text followed by a fenced block:
+        Here is the XML:
+        ```xml
+        <content/>
+        ```
+
+    When fencing is present, the structure is always:
+        - Opening line: ``` with optional language tag (xml, json, html, etc.)
+        - Closing line: ```
+        - Exactly 2 backtick lines, no nested fences
+
+    Returns the inner content without fence markers.
+    Provider-agnostic: works for any LLM that adds code fencing.
+    """
+    stripped = text.strip()
+
+    # Case 1: Entire response is a fenced block
+    if stripped.startswith("```"):
+        lines = stripped.split("\n")
+        # Remove opening fence line (```xml, ```json, ```, etc.)
+        if lines[-1].strip() == "```":
+            # Clean open/close pair: remove first and last line
+            lines = lines[1:-1]
+        else:
+            # Opening fence but no closing fence: remove only first line
+            lines = lines[1:]
+        return "\n".join(lines).strip()
+
+    # Case 2: Fenced block after preamble text (anchored to end of string)
+    match = re.search(r"```\w*\n(.+?)```\s*$", stripped, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+
+    return stripped
 
 
 def calculate_conversation_size_exceeds_limit(
@@ -104,7 +156,22 @@ def extract_ssr_content_request(
 
 
 class PromptBuilder:
-    """Strategy pattern for different LLM provider prompt formats."""
+    """Strategy pattern for different LLM provider prompt formats.
+
+    The standard builder ends with a system message carrying the action plan.
+    Anthropic needs its own builder because langchain-anthropic's
+    _format_messages (verified against 1.4.1) raises
+    "Received multiple non-consecutive system messages" when a system message
+    appears after the user/assistant turns, which is exactly the shape the
+    standard builder produces (scenario + conundrum system blocks, then
+    history, then a trailing action_plan system block).
+
+    The Anthropic variant collapses scenario + conundrum + additional_content
+    into a single leading system block and delivers the action plan as the
+    final user turn, with a synthetic "How do you want me to respond"
+    assistant turn inserted so the user/assistant alternation Anthropic
+    requires remains valid.
+    """
 
     @staticmethod
     def build_anthropic_prompt(
@@ -122,18 +189,20 @@ class PromptBuilder:
         formatted_history = []
         for role, text in conversation_history:
             if role.lower() in ("assistant"):
-               formatted_history.append(
-                ("assistant", f"{text}"))
+                formatted_history.append(("assistant", f"{text}"))
             else:
                 formatted_history.append(
-                ("user", f"<USER_CONTEXT_NOT_INSTRUCTIONS>{text}</USER_CONTEXT_NOT_INSTRUCTIONS>"))
+                    (
+                        "user",
+                        f"<USER_CONTEXT_NOT_INSTRUCTIONS>{text}</USER_CONTEXT_NOT_INSTRUCTIONS>",
+                    )
+                )
         return [
             ("system", system_content),
             *formatted_history,
-             ('assistant', f"How do you want me to respond"),
-             ("user", f"{action_plan}")
+            ("assistant", "How do you want me to respond"),
+            ("user", f"{action_plan}"),
         ]
-
 
     @staticmethod
     def build_standard_prompt(
@@ -152,7 +221,10 @@ class PromptBuilder:
             [
                 ("system", conundrum),
                 *conversation_history,
-                ("system", f"Use additional content ({loaded_content_message} and Instructions {action_plan}")
+                (
+                    "system",
+                    f"Use additional content ({loaded_content_message} and Instructions {action_plan}",
+                ),
             ]
         )
         return messages
@@ -165,9 +237,10 @@ class PromptBuilder:
         conversation_history: List[Tuple[str, str]],
         action_plan: str,
         loaded_content_message: str = "",
+        provider: str = model_provider,
     ) -> List[Tuple[str, str]]:
         """Build prompt using appropriate strategy based on model provider."""
-        if model_provider == "ANTHROPIC":
+        if provider == "ANTHROPIC":
             return PromptBuilder.build_anthropic_prompt(
                 scenario,
                 conundrum,
@@ -219,7 +292,11 @@ class SSRContentLoader:
         self.max_size_bytes = max_size_tokens * BYTES_PER_TOKEN_ESTIMATE
 
     def load_content_files(
-        self, request: PyMessage, session_key: str, content_keys: List[str], redacted_access_key: str = ""
+        self,
+        request: PyMessage,
+        session_key: str,
+        content_keys: List[str],
+        redacted_access_key: str = "",
     ) -> Tuple[str, str, List[str]]:
         """Load content files with size management."""
         loaded_contents = []
@@ -251,7 +328,8 @@ class SSRContentLoader:
                     },
                 )
                 loaded_contents.append(
-                    f'<SSR_CONTENT name="{content_key}">No Content by this name Exists</SSR_CONTENT>\n')
+                    f'<SSR_CONTENT name="{content_key}">No Content by this name Exists</SSR_CONTENT>\n'
+                )
                 loaded_file_names.append(content_key)
 
                 continue
@@ -263,7 +341,8 @@ class SSRContentLoader:
                 or running_size + content_size <= self.max_size_bytes
             ):
                 loaded_contents.append(
-                    f'\n<SSR_CONTENT name="{content_key}">\n{content}\n</SSR_CONTENT>\n')
+                    f'\n<SSR_CONTENT name="{content_key}">\n{content}\n</SSR_CONTENT>\n'
+                )
                 loaded_file_names.append(content_key)
                 running_size += content_size
             else:
@@ -280,88 +359,121 @@ class SSRContentLoader:
                     },
                 )
                 loaded_contents.append(
-                    f'<SSR_CONTENT name="{content_key}">Failed to Load this because SSR Content size exceeded.</SSR_CONTENT>\n')
+                    f'<SSR_CONTENT name="{content_key}">Failed to Load this because SSR Content size exceeded.</SSR_CONTENT>\n'
+                )
 
         xml_content = f'<SSR_CONTENTS>{"".join(loaded_contents)}</SSR_CONTENTS>'
         status_message = (
-            f'Loaded SSR Content {",".join(loaded_file_names)} for this request only.')
+            f'Loaded SSR Content {",".join(loaded_file_names)} for this request only.'
+        )
 
         return xml_content, status_message, failed_keys
 
 
-def initialize_llm() -> BaseChatModel:
+def _create_llm_instance(provider: str, model_name: str) -> BaseChatModel:
+    """Create a new LLM instance for the given provider and model.
 
-    match model_provider:
+    Uses per-provider credentials from provider_config.
+    """
+    config: Dict[str, Any] = provider_config.get(provider.upper(), {})
+    resolved_key = config.get("api_key")
+    if resolved_key is None:
+        raise ValueError(f"No API key configured for provider: {provider.upper()}")
+
+    match provider.upper():
         case "OPENAI":
             from langchain_openai import ChatOpenAI
 
             return ChatOpenAI(
-                model=model,
+                model=model_name,
                 max_completion_tokens=max_tokens,
                 max_retries=max_retries,
                 timeout=timeout,
-                temperature=temperature,
                 top_p=top_p,
                 frequency_penalty=frequency_penalty,
                 presence_penalty=presence_penalty,
-                api_key=api_key,
+                api_key=resolved_key,
+                streaming=True,
+                stream_usage=True,
             )
         case "GOOGLE":
-            from langchain_google_vertexai import ChatVertexAI
+            from langchain_google_genai import ChatGoogleGenerativeAI
 
-            return ChatVertexAI(
-                model_name=model,
-                max_tokens=max_tokens,
+            return ChatGoogleGenerativeAI(
+                model=model_name,
+                max_output_tokens=max_tokens,
                 max_retries=max_retries,
                 timeout=timeout,
                 temperature=temperature,
                 top_p=top_p,
-                frequency_penalty=frequency_penalty,
-                presence_penalty=presence_penalty,
-            )
-        case "IBM":
-            from langchain_ibm import ChatWatsonx
-
-            return ChatWatsonx(
-                model_id=model,
-                max_tokens=max_tokens,
-                max_retries=max_retries,
-                timeout=timeout,
-                temperature=temperature,
-                top_p=top_p,
-                frequency_penalty=frequency_penalty,
-                presence_penalty=presence_penalty,
-                apikey=api_key,
-                project_id=ibm_project_id,
-                url=ibm_url,
+                google_api_key=resolved_key,
+                streaming=True,
             )
         case "ANTHROPIC":
             from langchain_anthropic import ChatAnthropic
 
             return ChatAnthropic(
-                model_name=model,
-                max_tokens=max_tokens,
+                model_name=model_name,
+                max_tokens_to_sample=max_tokens,
                 max_retries=max_retries,
                 timeout=timeout,
-                temperature=temperature,
-                top_p=top_p,
                 model_kwargs={
                     "frequency_penalty": frequency_penalty,
                     "presence_penalty": presence_penalty,
                 },
-                api_key=api_key,
+                api_key=resolved_key,
                 stop=None,
+                streaming=True,
             )
-        case "OLLAMA":
-            from langchain_ollama import ChatOllama
-
-            return ChatOllama(model=model)
         case _:
-            raise ValueError("Invalid model provider")
+            raise ValueError(f"Invalid model provider: {provider}")
 
 
+# LLM instance cache: keyed by (provider, model) tuple
+_llm_cache: Dict[tuple, BaseChatModel] = {}
+
+
+def get_llm(
+    provider: Optional[str] = None, model_name: Optional[str] = None
+) -> BaseChatModel:
+    """Get or create an LLM instance for the given provider/model.
+
+    Falls back to the default provider/model from .env if not specified.
+    Caches instances by (provider, model) tuple to avoid re-initialization.
+    """
+    resolved_provider = (provider or model_provider).upper()
+    resolved_model = model_name or default_model
+
+    # If a non-default provider is requested, use its configured default model
+    if provider and not model_name:
+        config: Dict[str, Any] = provider_config.get(resolved_provider, {})
+        provider_default_model = config.get("default_model")
+        if isinstance(provider_default_model, str) and provider_default_model:
+            resolved_model = provider_default_model
+
+    if not isinstance(resolved_model, str) or not resolved_model:
+        raise ValueError(f"No model configured for provider: {resolved_provider}")
+
+    key: Tuple[str, str] = (resolved_provider, resolved_model)
+    if key not in _llm_cache:
+        _llm_cache[key] = _create_llm_instance(resolved_provider, resolved_model)
+        logger.info(
+            f"Created LLM instance for {resolved_provider}/{resolved_model}",
+            extra={
+                "provider": resolved_provider,
+                "model": resolved_model,
+                "session_key": "",
+                "class_selection": "",
+                "lesson": "",
+                "action_plan": "",
+            },
+        )
+    return _llm_cache[key]
+
+
+# Initialize the default LLM on module load (backward compatible)
 try:
-    llm = initialize_llm()
+    _default_llm = get_llm()
 except Exception as e:
     logger.critical("Failed to initialize LLM", extra={"error": str(e)})
 
@@ -376,14 +488,13 @@ def get_token_count(
 ) -> Tuple[int, int]:
     input_tokens = output_tokens = 0
 
-    # Safely access token usage metrics
-    response_metadata = getattr(llm_response, "response_metadata", {})
-    usage = response_metadata.get("usage", {})
+    # Use LangChain's normalized usage_metadata (provider-agnostic)
+    usage_metadata = getattr(llm_response, "usage_metadata", None)
+    if usage_metadata:
+        input_tokens = usage_metadata.get("input_tokens", 0)
+        output_tokens = usage_metadata.get("output_tokens", 0)
 
-    if usage:
-        input_tokens = usage.get("input_tokens", 0)
-        output_tokens = usage.get("output_tokens", 0)
-
+    if input_tokens or output_tokens:
         logger.info(
             f"Token usage Input {input_tokens}, Output {output_tokens}",
             extra={
@@ -402,13 +513,27 @@ def get_token_count(
 
 
 def invoke_llm_with_ssr(
-    p_SessionCache: "SessionCache", p_Request: PyMessage, p_sessionKey: str, redacted_access_key: str
+    p_SessionCache: "SessionCache",
+    p_Request: PyMessage,
+    p_sessionKey: str,
+    redacted_access_key: str,
 ) -> str:
-    global LastResponse
+    # Resolve provider/model up front so the exception handler can log them
+    resolved_provider = (
+        getattr(p_Request, "provider", None) or model_provider
+    ).upper()
+    resolved_model = getattr(p_Request, "model", None) or None
+    effective_model = resolved_model or provider_config.get(
+        resolved_provider, {}
+    ).get("default_model", "")
     try:
-        #Feed in the original request
+        llm_instance = get_llm(resolved_provider, resolved_model)
+
+        # Feed in the original request
         RequestText = p_Request.text
-        p_SessionCache.m_simpleCounterLLMConversation.add_message("user", RequestText, RequestText)
+        p_SessionCache.m_simpleCounterLLMConversation.add_message(
+            "user", RequestText, RequestText
+        )
 
         SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP: List[str] = []
 
@@ -477,15 +602,14 @@ def invoke_llm_with_ssr(
                 },
             )
 
-            import time
             TempAdditionalContent = ssr_state.additional_content
             current_time = time.strftime("%Y-%m-%d %H:%M:%S")
             temp_additional_content = (
-                    f"<CURRENT_DATE_TIME>{current_time}</CURRENT_DATE_TIME>\n"
-                    + TempAdditionalContent
-                    + "<SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP>"
-                    + ", ".join(SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP)
-                    + "</SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP>\n"
+                f"<CURRENT_DATE_TIME>{current_time}</CURRENT_DATE_TIME>\n"
+                + TempAdditionalContent
+                + "<SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP>"
+                + ", ".join(SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP)
+                + "</SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP>\n"
             )
 
             messages = PromptBuilder.build_prompt(
@@ -495,8 +619,8 @@ def invoke_llm_with_ssr(
                 conversation_history,
                 actionPlan,
                 ssr_state.loaded_content_message,
+                provider=resolved_provider,
             )
-
 
             # transform tuples into json and dump as string
             parsed_messages = (
@@ -504,7 +628,9 @@ def invoke_llm_with_ssr(
             )
 
             # Turn list of tuples into a readable string
-            messages_str = "\n".join([f"{role.upper()}: {content}" for role, content in messages])
+            messages_str = "\n".join(
+                [f"{role.upper()}: {content}" for role, content in messages]
+            )
 
             # Enforce 2 MB limit
             MAX_LOG_SIZE = 2 * 1024 * 1024  # 2 MB
@@ -512,7 +638,11 @@ def invoke_llm_with_ssr(
                 messages_str = messages_str[:MAX_LOG_SIZE] + "... [TRUNCATED]"
 
             if ssr_state.iteration_count == 1:
-                clipped_request = (RequestText[:120] + "...") if len(RequestText) > 120 else RequestText
+                clipped_request = (
+                    (RequestText[:120] + "...")
+                    if len(RequestText) > 120
+                    else RequestText
+                )
 
                 logger.info(
                     f"USER REQUEST : {clipped_request}\n{messages_str}",
@@ -520,6 +650,8 @@ def invoke_llm_with_ssr(
                         "session_key": p_sessionKey,
                         "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id,
                         "redacted_access_key": redacted_access_key,
+                        "provider": resolved_provider,
+                        "model": effective_model,
                         "messages": parsed_messages,
                         "class_selection": p_Request.classSelection or "",
                         "lesson": p_Request.lesson or "",
@@ -533,6 +665,8 @@ def invoke_llm_with_ssr(
                         "session_key": p_sessionKey,
                         "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id,
                         "redacted_access_key": redacted_access_key,
+                        "provider": resolved_provider,
+                        "model": effective_model,
                         "messages": parsed_messages,
                         "class_selection": p_Request.classSelection or "",
                         "lesson": p_Request.lesson or "",
@@ -540,10 +674,12 @@ def invoke_llm_with_ssr(
                     },
                 )
 
-            LLMResponse = llm.invoke(messages)
-            LLMMessage = extract_message_content(LLMResponse)
+            raw_response = llm_instance.invoke(messages)
+            response_text = strip_markdown_fencing(
+                extract_message_content(raw_response)
+            )
             request_token_count, response_token_count = get_token_count(
-                LLMResponse,
+                raw_response,
                 p_sessionKey,
                 redacted_access_key,
                 p_Request.classSelection or "",
@@ -554,23 +690,24 @@ def invoke_llm_with_ssr(
             ssr_state.add_tokens(request_token_count, response_token_count)
 
             # Process the LLM response for SSR content requests
-            response_content = extract_message_content(LLMResponse)
             has_ssr_request, requested_keys, answer_text = extract_ssr_content_request(
-                response_content
+                response_text
             )
 
             if requested_keys:
                 SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP.extend(requested_keys)
 
             logger.info(
-                f"LLM RESPONSE :\n{LLMMessage}",
+                f"LLM RESPONSE :\n{response_text}",
                 extra={
                     "session_key": p_sessionKey,
                     "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id,
                     "redacted_access_key": redacted_access_key,
+                    "provider": resolved_provider,
+                    "model": effective_model,
                     "total_input_tokens": str(ssr_state.total_input_tokens),
                     "total_output_tokens": str(ssr_state.total_output_tokens),
-                    "llm_response": extract_message_content(LLMResponse),
+                    "llm_response": response_text,
                     "class_selection": p_Request.classSelection or "",
                     "lesson": p_Request.lesson or "",
                     "action_plan": p_Request.actionPlan or "",
@@ -579,43 +716,48 @@ def invoke_llm_with_ssr(
 
             if not has_ssr_request:
                 if answer_text:
-                    # SSR  response without content request - return final answer
-                    LLMMessage = format_token_usage_message(
+                    # SSR response without content request: return final answer
+                    user_facing_message = format_token_usage_message(
                         ssr_state.total_input_tokens,
                         ssr_state.total_output_tokens,
                         ssr_state.iteration_count,
                     )
-                    LLMMessage += answer_text
+                    user_facing_message += answer_text
                     logger.info(
-                        f"SSR USER RESPONSE : ({LLMMessage})",
+                        f"SSR USER RESPONSE : ({user_facing_message})",
                         extra={
                             "session_key": p_sessionKey,
                             "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id,
                             "redacted_access_key": redacted_access_key,
+                            "provider": resolved_provider,
+                            "model": effective_model,
                             "total_input_tokens": str(ssr_state.total_input_tokens),
                             "total_output_tokens": str(ssr_state.total_output_tokens),
-                            "llm_response": extract_message_content(LLMResponse),
+                            "llm_response": response_text,
                             "class_selection": p_Request.classSelection or "",
                             "lesson": p_Request.lesson or "",
                             "action_plan": p_Request.actionPlan or "",
                         },
                     )
                 else:
+                    user_facing_message = response_text
                     logger.info(
-                        f"USER RESPONSE :\n{LLMMessage}",
+                        f"USER RESPONSE :\n{user_facing_message}",
                         extra={
                             "session_key": p_sessionKey,
                             "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id,
                             "redacted_access_key": redacted_access_key,
+                            "provider": resolved_provider,
+                            "model": effective_model,
                             "total_input_tokens": str(ssr_state.total_input_tokens),
                             "total_output_tokens": str(ssr_state.total_output_tokens),
-                            "llm_response": extract_message_content(LLMResponse),
+                            "llm_response": response_text,
                             "class_selection": p_Request.classSelection or "",
                             "lesson": p_Request.lesson or "",
                             "action_plan": p_Request.actionPlan or "",
                         },
                     )
-                # No SSR processing needed - break out of loop
+                # No SSR processing needed: break out of loop
                 break
 
             RequestText = "Here is the requested SSR Content"
@@ -623,13 +765,13 @@ def invoke_llm_with_ssr(
             # if more content is being requested and exceeded max iterations, use what you have.
             if ssr_state.has_exceeded_max_iterations():
 
-                LLMMessage = format_token_usage_message(
+                user_facing_message = format_token_usage_message(
                     ssr_state.total_input_tokens,
                     ssr_state.total_output_tokens,
                     ssr_state.iteration_count,
                 )
-                LLMMessage += answer_text + "\n"
-                LLMMessage += "**SSR exceeded loop count.  Consider narrowing down your question**"
+                user_facing_message += answer_text + "\n"
+                user_facing_message += "**SSR exceeded loop count.  Consider narrowing down your question**"
 
                 logger.warning(
                     "SSR Loop exceeded maximum iterations",
@@ -644,7 +786,7 @@ def invoke_llm_with_ssr(
                         "answer_text": answer_text,
                         "total_input_tokens": str(ssr_state.total_input_tokens),
                         "total_output_tokens": str(ssr_state.total_output_tokens),
-                        "llm_message": LLMMessage,
+                        "llm_message": user_facing_message,
                         "class_selection": p_Request.classSelection or "",
                         "lesson": p_Request.lesson or "",
                         "action_plan": p_Request.actionPlan or "",
@@ -670,24 +812,36 @@ def invoke_llm_with_ssr(
             )
 
             # LLM requested SSR content.  Record the response in the conversation.
-            p_SessionCache.m_simpleCounterLLMConversation.add_message("assistant", extract_message_content(LLMResponse), None)
-            # and indicate user is going to send it in prompt (but not in conversation)
-            p_SessionCache.m_simpleCounterLLMConversation.add_message("user", RequestText, None)
-
-            content_loaded, loaded_status, failed_keys = content_loader.load_content_files(
-                p_Request, p_sessionKey, requested_keys, redacted_access_key
+            p_SessionCache.m_simpleCounterLLMConversation.add_message(
+                "assistant", response_text, None
             )
-#if these keys failed to load, remove them from the memory of that event.
-            if failed_keys:
-                SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP = [key for key in SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP if key not in failed_keys]
+            # and indicate user is going to send it in prompt (but not in conversation)
+            p_SessionCache.m_simpleCounterLLMConversation.add_message(
+                "user", RequestText, None
+            )
 
-            ssr_state.additional_content     = content_loaded
+            content_loaded, loaded_status, failed_keys = (
+                content_loader.load_content_files(
+                    p_Request, p_sessionKey, requested_keys, redacted_access_key
+                )
+            )
+            # if these keys failed to load, remove them from the memory of that event.
+            if failed_keys:
+                SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP = [
+                    key
+                    for key in SSR_CONTENT_REQUESTED_DURING_THIS_SSR_LOOP
+                    if key not in failed_keys
+                ]
+
+            ssr_state.additional_content = content_loaded
             ssr_state.loaded_content_message = loaded_status
 
             # End of while loop
 
         # This is recording the last assistant response in the conversation.  Original Request was put in earlier
-        p_SessionCache.m_simpleCounterLLMConversation.add_message("assistant", extract_message_content(LLMResponse), LLMMessage)
+        p_SessionCache.m_simpleCounterLLMConversation.add_message(
+            "assistant", response_text, user_facing_message
+        )
 
         # Check if conversation size management is needed
         user_conversation_size = (
@@ -703,6 +857,8 @@ def invoke_llm_with_ssr(
                     "session_key": p_sessionKey,
                     "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id,
                     "redacted_access_key": redacted_access_key,
+                    "provider": resolved_provider,
+                    "model": effective_model,
                     "user_conversation_size": str(user_conversation_size),
                     "class_selection": p_Request.classSelection or "",
                     "lesson": p_Request.lesson or "",
@@ -712,12 +868,12 @@ def invoke_llm_with_ssr(
             p_SessionCache.m_simpleCounterLLMConversation.prune_oldest_pair()
 
         if ssr_state.conversation_truncated:
-            LLMMessage = (
+            user_facing_message = (
                 "Old Conversations getting dropped.  Consider starting a new Conversation\n"
-                + LLMMessage
+                + user_facing_message
             )
 
-        return LLMMessage
+        return user_facing_message
 
     except Exception as e:
         logger.error(
@@ -725,8 +881,14 @@ def invoke_llm_with_ssr(
             exc_info=True,
             extra={
                 "session_key": p_sessionKey,
-                "conversation_id": p_SessionCache.m_simpleCounterLLMConversation.conversation_id if p_SessionCache else "",
+                "conversation_id": (
+                    p_SessionCache.m_simpleCounterLLMConversation.conversation_id
+                    if p_SessionCache
+                    else ""
+                ),
                 "redacted_access_key": redacted_access_key,
+                "provider": resolved_provider,
+                "model": effective_model,
                 "error": str(e),
                 "class_selection": p_Request.classSelection if p_Request else "",
                 "lesson": p_Request.lesson if p_Request else "",

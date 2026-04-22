@@ -195,58 +195,95 @@ if not mailgun_from_address and mailgun_enabled:
     raise ValueError(error_message)
 
 
-model_provider = typing.cast(str, os.getenv("MODEL_PROVIDER"))
-if not model_provider:
-    logger.error(
-        "No model provider selected, using default",
-        extra={
-            "default_provider": "OPENAI",
-            "session_key": "",
-            "class_selection": "",
-            "lesson": "",
-            "action_plan": "",
-        },
-    )
-    model_provider = "OPENAI"
+# =============================================================================
+# Model Configuration
+# =============================================================================
+# Each provider has its own API key (required) and an optional comma-separated
+# PROVIDER_MODELS list (first entry is that provider's default model). At
+# least one provider API key must be configured or the server refuses to
+# start. The first provider in PROVIDER_PRIORITY that has an API key becomes
+# the server-side default for requests that don't specify a provider.
 
-model = typing.cast(str, os.getenv("MODEL"))
-if not model:
+PROVIDER_PRIORITY: tuple[str, ...] = ("ANTHROPIC", "OPENAI", "GOOGLE")
+
+DEFAULT_PROVIDER_MODELS: Dict[str, list[str]] = {
+    "ANTHROPIC": [
+        "claude-opus-4-7",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5",
+    ],
+    "OPENAI": [
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.4-nano",
+    ],
+    "GOOGLE": [
+        "gemini-3.1-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite-preview",
+    ],
+}
+
+
+def _parse_models_list(env_var: str, fallback_models: list[str]) -> list:
+    """Parse a provider model list from PROVIDER_MODELS, falling back to the built-in list."""
+    models_str = os.getenv(env_var)
+    if models_str:
+        return [m.strip() for m in models_str.split(",") if m.strip()]
+    return list(fallback_models)
+
+
+def _load_provider_config() -> Dict[str, Dict]:
+    """Load per-provider credentials from environment variables."""
+    config: Dict[str, Dict] = {}
+    for provider in PROVIDER_PRIORITY:
+        key = os.getenv(f"{provider}_API_KEY")
+        models = _parse_models_list(
+            f"{provider}_MODELS",
+            list(DEFAULT_PROVIDER_MODELS[provider]),
+        )
+        config[provider] = {
+            "api_key": SecretStr(key) if key else None,
+            "models": models,
+            "default_model": models[0],
+            "available": bool(key),
+        }
+    return config
+
+
+provider_config: Dict[str, Dict] = _load_provider_config()
+
+_available = [p for p, c in provider_config.items() if c["available"]]
+if not _available:
     logger.error(
-        "No model selected, using default",
+        "No provider API keys configured",
         extra={
-            "default_model": "atgpt-4o-latest",
+            "required": "At least one provider key must be configured",
+            "supported_providers": str(list(provider_config.keys())),
             "session_key": "",
             "class_selection": "",
             "lesson": "",
             "action_plan": "",
         },
     )
-    model = "chatgpt-4o-latest"
+    raise ValueError("At least one provider API key must be configured")
+
+# First provider in priority order with an API key becomes the server default.
+model_provider = next(p for p in PROVIDER_PRIORITY if p in _available)
+default_model = provider_config[model_provider]["default_model"]
+
 logger.info(
-    "Model configured",
+    "Provider configuration loaded",
     extra={
-        "model": str(model),
+        "available_providers": str(_available),
+        "default_provider": str(model_provider),
+        "default_model": str(default_model),
         "session_key": "",
-        "classSelection": "",
+        "class_selection": "",
         "lesson": "",
-        "actionPlan": "",
+        "action_plan": "",
     },
 )
-
-api_key = typing.cast(SecretStr, os.getenv("API_KEY"))
-if not api_key and model_provider != "GOOGLE":
-    logger.error(
-        "API key not configured",
-        extra={
-            "missing_var": "API_KEY",
-            "model_provider": str(model_provider),
-            "session_key": "",
-            "class_selection": "",
-            "lesson": "",
-            "action_plan": "",
-        },
-    )
-    raise ValueError("API_KEY environment variable not set")
 
 max_tokens = int(os.getenv("MAX_TOKENS") or 10000)
 
@@ -288,7 +325,7 @@ def validate_ssr_configuration():
 
 max_retries = int(os.getenv("MAX_RETRIES") or "2")
 
-timeout = int(os.getenv("TIMEOUT") or "60")
+timeout = int(os.getenv("TIMEOUT") or "300")
 
 temperature = float(os.getenv("TEMPERATURE") or "0.7")
 
@@ -303,25 +340,6 @@ if os.getenv("FREQUENCY_PENALTY"):
 presence_penalty = None
 if os.getenv("PRESENCE_PENALTY"):
     presence_penalty = float(os.getenv("PRESENCE_PENALTY"))  # type: ignore
-
-ibm_url = typing.cast(SecretStr, os.getenv("IBM_URL"))
-if not ibm_url:
-    ibm_url = "https://us-south.ml.cloud.ibm.com"
-
-ibm_project_id = typing.cast(str, os.getenv("IBM_PROJECT_ID"))
-if not ibm_project_id and model_provider == "IBM":
-    logger.error(
-        "IBM project ID not configured",
-        extra={
-            "missing_var": "IBM_PROJECT_ID",
-            "model_provider": "IBM",
-            "session_key": "",
-            "class_selection": "",
-            "lesson": "",
-            "action_plan": "",
-        },
-    )
-    raise ValueError("IBM_PROJECT_ID environment variable not set")
 
 system_encoding = (
     "utf-8" if platform.system() == "Windows" else None

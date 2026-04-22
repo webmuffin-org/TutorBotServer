@@ -4,10 +4,12 @@ services:
     environment:
       - ENV=${ENV:-prod}
       - CLOUD_MODE=${CLOUD_MODE:-true}
+      - PORT=${PORT:-3000}
       - S3_BUCKET_ENDPOINT=${S3_BUCKET_ENDPOINT}
       - S3_BUCKET_ACCESS_KEY=${S3_BUCKET_ACCESS_KEY}
       - S3_BUCKET_ACCESS_SECRET=${S3_BUCKET_ACCESS_SECRET}
       - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - S3_BUCKET_PATH=${S3_BUCKET_PATH:-}
       - MAILGUN_ENABLED=${MAILGUN_ENABLED:-false}
       - MAILGUN_API_KEY=${MAILGUN_API_KEY}
       - MAILGUN_API_URL=${MAILGUN_API_URL}
@@ -15,14 +17,17 @@ services:
       - LOKI_URL=${LOKI_URL:-https://loki.vws.ovh}
       - LOKI_USER=${LOKI_USER:-loki}
       - LOKI_PASSWORD=${LOKI_PASSWORD}
-      - LOKI_ORG_ID=webmuffin
+      - LOKI_ORG_ID=${LOKI_ORG_ID}
       - LOKI_LABELS=${LOKI_LABELS}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_MODELS=${ANTHROPIC_MODELS:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODELS=${OPENAI_MODELS:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GOOGLE_MODELS=${GOOGLE_MODELS:-}
       - MAX_TOKENS=${MAX_TOKENS:-10000}
+      - MAX_CONVERSATION_TOKENS=${MAX_CONVERSATION_TOKENS:-20000}
       - MAX_RETRIES=${MAX_RETRIES:-2}
-      - MODEL_PROVIDER=${MODEL_PROVIDER:-OPENAI}
-      - MODEL=${MODEL:-chatgpt-4o-latest}
-      - API_KEY=${API_KEY}
-      - PORT=${PORT}
       - TIMEOUT=${TIMEOUT:-60}
       - TEMPERATURE=${TEMPERATURE}
       - TOP_P=${TOP_P}
@@ -32,7 +37,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - "bash -c ':> /dev/tcp/127.0.0.1/${PORT}' || exit 1"
+        - "bash -c ':> /dev/tcp/127.0.0.1/${PORT:-3000}' || exit 1"
       interval: 15s
       timeout: 10s
       retries: 3

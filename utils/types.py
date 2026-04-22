@@ -8,6 +8,8 @@ class PyMessage(BaseModel):
     lesson: str
     actionPlan: str
     accessKey: str
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
 
 class StatusResponse(BaseModel):
