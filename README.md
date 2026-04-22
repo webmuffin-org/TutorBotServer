@@ -112,7 +112,8 @@ To run the development server, follow these steps:
 python ./TutorBot_Server.py
 ```
 
-- Open the application at `http://localhost:<PORT_FROM_ENV_VARS>`.
+- Open the application at `http://localhost:3000` (or the `PORT` value
+  from your `.env` file, if you overrode the default).
 
 ## Build executable bundles
 
