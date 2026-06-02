@@ -208,8 +208,8 @@ PROVIDER_PRIORITY: tuple[str, ...] = ("ANTHROPIC", "OPENAI", "GOOGLE")
 
 DEFAULT_PROVIDER_MODELS: Dict[str, list[str]] = {
     "ANTHROPIC": [
-        "claude-opus-4-7",
         "claude-sonnet-4-6",
+        "claude-opus-4-7",
         "claude-haiku-4-5",
     ],
     "OPENAI": [
@@ -467,8 +467,8 @@ def _parse_status_page_url() -> tuple[Optional[str], Optional[str]]:
     parsed = urlparse(status_page_url)
     base_url = f"{parsed.scheme}://{parsed.netloc}"
 
-    path = parsed.path.rstrip('/')
-    segments = [s for s in path.split('/') if s]
+    path = parsed.path.rstrip("/")
+    segments = [s for s in path.split("/") if s]
 
     if not segments:
         return base_url, None

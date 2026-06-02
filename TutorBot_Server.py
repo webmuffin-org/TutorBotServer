@@ -8,6 +8,7 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
+from starlette.routing import Match
 import uuid
 import uvicorn
 
@@ -79,6 +80,12 @@ app = FastAPI(title="TutorBot", description="Your personal tutor", version="0.0.
 app.mount("/static", StaticFiles(directory="static"), name="static")
 # Allow all local network computers (example for 192.168.1.x range)
 allowed_origins = ["*"]
+
+
+def is_exposed_path(request: Request) -> bool:
+    return any(route.matches(request.scope)[0] != Match.NONE for route in app.routes)
+
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -186,6 +193,9 @@ async def add_cors_headers(request: Request, call_next):
 @app.middleware("http")
 async def check_session_key(request: Request, call_next):
     # logging.warning(request.headers)
+
+    if not is_exposed_path(request):
+        return Response(status_code=404)
 
     if request.url.path.startswith("/static/"):
         # Allow static file requests to pass through
