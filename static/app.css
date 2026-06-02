@@ -330,13 +330,6 @@ select:hover {
 	background-color: #e6e6e6;
 }
 
-label[for="providerDropdown"],
-#providerDropdown,
-label[for="modelDropdown"],
-#modelDropdown {
-	display: none;
-}
-
 .thinkingIndicator {
 	margin-right: 10px;
 }
