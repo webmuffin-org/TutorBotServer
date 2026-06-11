@@ -1,7 +1,7 @@
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from fastapi import HTTPException
 from langchain_core.language_models import BaseChatModel
@@ -433,23 +433,10 @@ def _create_llm_instance(provider: str, model_name: str) -> BaseChatModel:
 _llm_cache: Dict[tuple, BaseChatModel] = {}
 
 
-def get_llm(
-    provider: Optional[str] = None, model_name: Optional[str] = None
-) -> BaseChatModel:
-    """Get or create an LLM instance for the given provider/model.
-
-    Falls back to the default provider/model from .env if not specified.
-    Caches instances by (provider, model) tuple to avoid re-initialization.
-    """
-    resolved_provider = (provider or model_provider).upper()
-    resolved_model = model_name or default_model
-
-    # If a non-default provider is requested, use its configured default model
-    if provider and not model_name:
-        config: Dict[str, Any] = provider_config.get(resolved_provider, {})
-        provider_default_model = config.get("default_model")
-        if isinstance(provider_default_model, str) and provider_default_model:
-            resolved_model = provider_default_model
+def get_llm() -> BaseChatModel:
+    """Get or create the environment-configured LLM instance."""
+    resolved_provider = model_provider.upper()
+    resolved_model = default_model
 
     if not isinstance(resolved_model, str) or not resolved_model:
         raise ValueError(f"No model configured for provider: {resolved_provider}")
@@ -518,16 +505,10 @@ def invoke_llm_with_ssr(
     p_sessionKey: str,
     redacted_access_key: str,
 ) -> str:
-    # Resolve provider/model up front so the exception handler can log them
-    resolved_provider = (
-        getattr(p_Request, "provider", None) or model_provider
-    ).upper()
-    resolved_model = getattr(p_Request, "model", None) or None
-    effective_model = resolved_model or provider_config.get(
-        resolved_provider, {}
-    ).get("default_model", "")
+    resolved_provider = model_provider.upper()
+    effective_model = default_model
     try:
-        llm_instance = get_llm(resolved_provider, resolved_model)
+        llm_instance = get_llm()
 
         # Feed in the original request
         RequestText = p_Request.text

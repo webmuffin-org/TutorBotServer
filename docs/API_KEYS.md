@@ -111,25 +111,22 @@ service accounts instead of API keys.
 
 ## Putting it all together
 
-In this project, each provider has its own environment variable.
+In this project, the active provider and the single model for each provider are configured through environment variables.
 A minimum working configuration can look like this:
 
 ```bash
+MODEL_PROVIDER=ANTHROPIC
 ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_MODELS=claude-opus-4-7,claude-sonnet-4-6
+ANTHROPIC_MODEL=claude-opus-4-7
 
-# Optional: configure additional providers the UI can switch to
 OPENAI_API_KEY=sk-...
-OPENAI_MODELS=gpt-5.4,gpt-5.4-mini
+OPENAI_MODEL=gpt-5.4
 
 GOOGLE_API_KEY=AIza...
-GOOGLE_MODELS=gemini-3.1-pro-preview,gemini-3-flash-preview
+GOOGLE_MODEL=gemini-3.1-pro-preview
 ```
 
-The first entry of each `PROVIDER_MODELS` list is that provider's default
-model. When a request doesn't specify a provider, the server uses the first
-provider in priority order (Anthropic, OpenAI, Google) that has an API key.
-The UI dropdowns let users pick per-request.
+`MODEL_PROVIDER` selects the provider used by every request. The selected provider must have its matching API key configured, for example `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`. Each provider has one configured model through its matching model variable, for example `ANTHROPIC_MODEL`, `OPENAI_MODEL`, or `GOOGLE_MODEL`.
 
 See `.env.example` for the full list of variables.
 

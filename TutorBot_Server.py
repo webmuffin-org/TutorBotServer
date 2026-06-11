@@ -30,7 +30,6 @@ from constants import (  # noqa: E402
     port,
     default_model,
     model_provider,
-    provider_config,
     service_name,
     top_p,
     temperature,
@@ -109,6 +108,7 @@ def startup_event():
     logger.info(
         "Model configuration",
         extra={
+            "provider": model_provider,
             "model": default_model,
             "session_key": "",
             "class_selection": "",
@@ -798,29 +798,6 @@ async def get_conversation_data(request: Request, payload: dict):
         raise HTTPException(
             status_code=500, detail="Error retrieving conversation data"
         )
-
-
-@app.get("/providers/")
-async def list_available_providers(request: Request):
-    """Return available LLM providers and their configured models."""
-    session_key = request.cookies.get("session_key")
-    if not session_key:
-        raise HTTPException(status_code=401, detail="Session key is missing")
-
-    providers = []
-    for provider_name, config in provider_config.items():
-        providers.append({
-            "provider": provider_name,
-            "models": config.get("models", []),
-            "default_model": config.get("default_model", ""),
-            "available": config.get("available", False),
-        })
-
-    return JSONResponse(content={
-        "providers": providers,
-        "default_provider": model_provider,
-        "default_model": default_model,
-    })
 
 
 @app.get("/status/")

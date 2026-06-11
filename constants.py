@@ -198,54 +198,31 @@ if not mailgun_from_address and mailgun_enabled:
 # =============================================================================
 # Model Configuration
 # =============================================================================
-# Each provider has its own API key (required) and an optional comma-separated
-# PROVIDER_MODELS list (first entry is that provider's default model). At
-# least one provider API key must be configured or the server refuses to
-# start. The first provider in PROVIDER_PRIORITY that has an API key becomes
-# the server-side default for requests that don't specify a provider.
+# MODEL_PROVIDER selects the active provider. Each provider has one API key and
+# one model configured through environment variables:
+# MODEL_PROVIDER, {PROVIDER}_API_KEY, and {PROVIDER}_MODEL.
 
 PROVIDER_PRIORITY: tuple[str, ...] = ("ANTHROPIC", "OPENAI", "GOOGLE")
 
-DEFAULT_PROVIDER_MODELS: Dict[str, list[str]] = {
-    "ANTHROPIC": [
-        "claude-sonnet-4-6",
-        "claude-opus-4-7",
-        "claude-haiku-4-5",
-    ],
-    "OPENAI": [
-        "gpt-5.4",
-        "gpt-5.4-mini",
-        "gpt-5.4-nano",
-    ],
-    "GOOGLE": [
-        "gemini-3.1-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite-preview",
-    ],
+DEFAULT_PROVIDER_MODELS: Dict[str, str] = {
+    "ANTHROPIC": "claude-sonnet-4-6",
+    "OPENAI": "gpt-5.4",
+    "GOOGLE": "gemini-3.1-pro-preview",
 }
 
 
-def _parse_models_list(env_var: str, fallback_models: list[str]) -> list:
-    """Parse a provider model list from PROVIDER_MODELS, falling back to the built-in list."""
-    models_str = os.getenv(env_var)
-    if models_str:
-        return [m.strip() for m in models_str.split(",") if m.strip()]
-    return list(fallback_models)
-
-
 def _load_provider_config() -> Dict[str, Dict]:
-    """Load per-provider credentials from environment variables."""
+    """Load per-provider credentials and model names from environment variables."""
     config: Dict[str, Dict] = {}
     for provider in PROVIDER_PRIORITY:
         key = os.getenv(f"{provider}_API_KEY")
-        models = _parse_models_list(
-            f"{provider}_MODELS",
-            list(DEFAULT_PROVIDER_MODELS[provider]),
-        )
+        model = (
+            os.getenv(f"{provider}_MODEL") or DEFAULT_PROVIDER_MODELS[provider]
+        ).strip()
         config[provider] = {
             "api_key": SecretStr(key) if key else None,
-            "models": models,
-            "default_model": models[0],
+            "model": model,
+            "default_model": model,
             "available": bool(key),
         }
     return config
@@ -253,12 +230,12 @@ def _load_provider_config() -> Dict[str, Dict]:
 
 provider_config: Dict[str, Dict] = _load_provider_config()
 
-_available = [p for p, c in provider_config.items() if c["available"]]
-if not _available:
+model_provider = os.getenv("MODEL_PROVIDER", PROVIDER_PRIORITY[0]).strip().upper()
+if model_provider not in provider_config:
     logger.error(
-        "No provider API keys configured",
+        "Invalid model provider configured",
         extra={
-            "required": "At least one provider key must be configured",
+            "model_provider": model_provider,
             "supported_providers": str(list(provider_config.keys())),
             "session_key": "",
             "class_selection": "",
@@ -266,18 +243,46 @@ if not _available:
             "action_plan": "",
         },
     )
-    raise ValueError("At least one provider API key must be configured")
+    raise ValueError(
+        f"MODEL_PROVIDER must be one of: {', '.join(provider_config.keys())}"
+    )
 
-# First provider in priority order with an API key becomes the server default.
-model_provider = next(p for p in PROVIDER_PRIORITY if p in _available)
-default_model = provider_config[model_provider]["default_model"]
+selected_provider_config = provider_config[model_provider]
+if not selected_provider_config["api_key"]:
+    logger.error(
+        "Selected provider API key not configured",
+        extra={
+            "model_provider": model_provider,
+            "missing_var": f"{model_provider}_API_KEY",
+            "session_key": "",
+            "class_selection": "",
+            "lesson": "",
+            "action_plan": "",
+        },
+    )
+    raise ValueError(f"{model_provider}_API_KEY must be configured")
+
+if not selected_provider_config["model"]:
+    logger.error(
+        "Selected provider model not configured",
+        extra={
+            "model_provider": model_provider,
+            "missing_var": f"{model_provider}_MODEL",
+            "session_key": "",
+            "class_selection": "",
+            "lesson": "",
+            "action_plan": "",
+        },
+    )
+    raise ValueError(f"{model_provider}_MODEL must be configured")
+
+default_model = selected_provider_config["model"]
 
 logger.info(
     "Provider configuration loaded",
     extra={
-        "available_providers": str(_available),
-        "default_provider": str(model_provider),
-        "default_model": str(default_model),
+        "configured_provider": str(model_provider),
+        "configured_model": str(default_model),
         "session_key": "",
         "class_selection": "",
         "lesson": "",
