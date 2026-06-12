@@ -395,6 +395,11 @@ def _create_llm_instance(provider: str, model_name: str) -> BaseChatModel:
                 api_key=resolved_key,
                 streaming=True,
                 stream_usage=True,
+                # Possible values: "none", "minimal", "low", "medium", "high",
+                # "xhigh". "none" disables reasoning on GPT-5.1+ models; the
+                # original GPT-5 only goes down to "minimal"; "xhigh" exists
+                # on GPT-5.4+.
+                reasoning_effort="none",
             )
         case "GOOGLE":
             from langchain_google_genai import ChatGoogleGenerativeAI
@@ -408,6 +413,11 @@ def _create_llm_instance(provider: str, model_name: str) -> BaseChatModel:
                 top_p=top_p,
                 google_api_key=resolved_key,
                 streaming=True,
+                # Possible values: "minimal", "low", "medium", "high".
+                # Gemini 3+ models cannot fully disable thinking; "low" is the
+                # minimum on Pro models ("minimal" exists only on Flash).
+                # Defaults to "high" when unset.
+                thinking_level="low",
             )
         case "ANTHROPIC":
             from langchain_anthropic import ChatAnthropic
@@ -424,6 +434,17 @@ def _create_llm_instance(provider: str, model_name: str) -> BaseChatModel:
                 api_key=resolved_key,
                 stop=None,
                 streaming=True,
+                # Possible values: {"type": "disabled"}, {"type": "adaptive"},
+                # and the deprecated {"type": "enabled", "budget_tokens": N}.
+                # "disabled" is accepted on Sonnet/Haiku/Opus 4.x; Fable 5
+                # rejects an explicit "disabled" (omit the param entirely there).
+                thinking={"type": "disabled"},
+                # Possible values: "low", "medium", "high", "xhigh", "max".
+                # Defaults to "high" when unset. "max" needs Opus 4.6+ or
+                # Sonnet 4.6 (not Haiku); "xhigh" needs Opus 4.7+.
+                # Typed shorthand for output_config={"effort": ...}; both are
+                # sent to the API as output_config.effort.
+                effort="low",
             )
         case _:
             raise ValueError(f"Invalid model provider: {provider}")
